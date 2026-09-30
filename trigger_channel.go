@@ -94,6 +94,13 @@ func (t *ChannelTrigger) handlePacket(pkt *meshcore.Packet) {
 		"channel", ch.Name, "sender", msg.Sender,
 		"text", msg.Text, "snr", pkt.SNR, "rssi", pkt.RSSI)
 
+	// Ignore our own messages: repeaters echo our sends back to us, and
+	// matching them would re-trigger the bot forever.
+	if msg.Sender == t.botName {
+		t.log.Log(context.Background(), LevelTrace, "ignoring own message")
+		return
+	}
+
 	if t.channels != nil && !t.channels[ch.Name] {
 		t.log.Log(context.Background(), LevelTrace, "channel not matched, skipping",
 			"received", ch.Name, "listening", t.channelNames())

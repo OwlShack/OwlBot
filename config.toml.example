@@ -1,16 +1,21 @@
-# Connection Node type
-nodeType = "kiss"
-
-# Connection Settings
+# Which radio, chosen by scheme (nodeType is no longer needed and is ignored):
+#   serial:///dev/ttyACM0 or tcp://host:port        MeshCore KISS firmware
+#   openhop:///dev/ttyUSB0 or openhop://host:port   openHop Modem firmware
+#   spi://                                          bare SX1262 hat; set spiBoard
 connection = "serial:///dev/ttyACM0"
 baudRate = 115200
+# spiBoard = "rak6421-13300x-slot1"   # required for spi://, see README
+# modemToken = ""                     # openHop over TCP, if the modem has one
 
-# Radio Settings - Only for KISS
+# Radio Settings
 freq = 917.375
 bw = 62.50
 sf = 7
 cr = 8
 tx = 22
+# Transmit duty cycle, percent. Fractions allowed, so an EU868 0.1% sub-band
+# is expressible; NZ/AU 915-928 MHz has no duty-cycle limit. Default 50.
+# dutyCycle = 50
 
 [[bot]]
 name = "Ping Bot"
@@ -20,3 +25,20 @@ type = "channel"
 template = "@[{{.Sender}}] HashSize={{.PathHashSize}} Hops={{.Hops}} Paths={{.PathHashes | formatPathBytes}}"
 channels = ["#testing"]
 match = ["(?i)^test.*", "(?i)^ping.*"]
+
+# MQTT publishing lives under exactly one bot (app-wide). Remove [bot.mqtt]
+# to run without MQTT. A root-level [[observer]] block from an older config is
+# migrated here automatically on first load (original saved as *.bak-*).
+[bot.mqtt]
+name = "LetsMesh Observer"
+iataCode = "test"
+# keyFile = "mqtt_identity.key"   # identity seed for topics/auth; generated if missing
+statusInterval = 300
+
+[[bot.mqtt.broker]]
+name = "letsmesh"
+enabled = true
+host = "mqtt.letsmesh.net"
+port = 1883
+topicPrefix = "meshcore"
+dedup = true

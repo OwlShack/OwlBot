@@ -38,9 +38,13 @@ go.work.sum
 
 !.github/workflows/*.yml
 !.github/workflows/*.yaml
+# Embedded into the binary: without it every checkout fails to build.
+!modem_boards.json
 
 # Docker build staging
 docker/bin/
 
 # Binary Builds
 meshcore-bot
+
+scratchpad/

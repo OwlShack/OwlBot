@@ -44,11 +44,18 @@ func identityFromFile(data []byte) (meshcore.LocalIdentity, error) {
 	return meshcore.NewLocalIdentityFromSeed(s), nil
 }
 
+// writeIdentity persists the seed atomically (temp file + rename) so a crash
+// mid-write can't corrupt the key and silently rotate the identity.
 func writeIdentity(path string, id meshcore.LocalIdentity) error {
 	seed := id.Seed()
 	content := hex.EncodeToString(seed[:]) + "\n"
-	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("writing key file: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("renaming key file into place: %w", err)
 	}
 	return nil
 }

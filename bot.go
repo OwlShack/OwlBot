@@ -27,7 +27,7 @@ type Bot struct {
 	name      string
 	node      *node.Node
 	radio     node.MuxRadio
-	sender    Sender
+	sender    *NodeSender
 	templater *Templater
 	triggers  []triggerEntry
 	log       *slog.Logger
@@ -36,7 +36,7 @@ type Bot struct {
 	cancel context.CancelFunc
 }
 
-func NewBot(cfg BotConfig, mux *node.RadioMux, sf SenderFactory, nodeOpts ...node.Option) (*Bot, error) {
+func NewBot(cfg BotConfig, mux *node.RadioMux, nodeOpts ...node.Option) (*Bot, error) {
 	if cfg.Name == nil || *cfg.Name == "" {
 		return nil, fmt.Errorf("bot name is required")
 	}
@@ -52,7 +52,7 @@ func NewBot(cfg BotConfig, mux *node.RadioMux, sf SenderFactory, nodeOpts ...nod
 	}, nodeOpts...)
 	n := node.New(identity, radio, opts...)
 
-	sender := sf(n)
+	sender := NewNodeSender(n)
 
 	b := &Bot{
 		name:      botName,
@@ -84,7 +84,6 @@ func NewBot(cfg BotConfig, mux *node.RadioMux, sf SenderFactory, nodeOpts ...nod
 				}
 				channels = append(channels, ch)
 				n.SetChannel(channelIdx, ch)
-				sender.RegisterChannel(channelIdx, ch)
 				channelIdx++
 			}
 		}
