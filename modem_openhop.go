@@ -103,6 +103,16 @@ type openhopStatsProvider struct {
 
 func (p *openhopStatsProvider) RadioConfig() RadioInfo { return p.radio }
 
+// LastReply is the modem's last STATUS answer. It starts the liveness probe,
+// which a serial link needs: the driver reconnects a dropped link itself, and
+// TCP drops a silent one after 60 s, but serial has no idle deadline, so a hung
+// board otherwise stays connected and healthy-looking.
+func (p *openhopStatsProvider) LastReply() time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lastAt
+}
+
 // Stats has no timeout of its own to add: openhop.Modem.Status bounds itself.
 func (p *openhopStatsProvider) Stats(ctx context.Context) DeviceStats {
 	if st, err := p.modem.Status(ctx); err != nil {

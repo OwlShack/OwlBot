@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -377,4 +378,139 @@ func TestModemKeysOutsideConnectionForceReconnect(t *testing.T) {
 	if modemConfigChanged(&Config{Connection: conn, NodeType: s("kiss")}, &Config{Connection: conn}) {
 		t.Error("an ignored nodeType change forced a modem reconnect")
 	}
+}
+
+// fakeWatchModem is a node.Modem with a Dead() channel the test controls.
+type fakeWatchModem struct{ dead chan struct{} }
+
+func (fakeWatchModem) SendData([]byte) error                            { return nil }
+func (fakeWatchModem) SetDataHandler(func([]byte, float32, int8, bool)) {}
+func (fakeWatchModem) AddOutboundHandler(func([]byte))                  {}
+func (f fakeWatchModem) Dead() <-chan struct{}                          { return f.dead }
+
+// fakeProbeStats answers a status poll by moving LastReply, until hung.
+type fakeProbeStats struct {
+	mu     sync.Mutex
+	last   time.Time
+	hung   bool
+	polls  int
+	silent bool // never answers at all
+}
+
+func (f *fakeProbeStats) RadioConfig() RadioInfo { return RadioInfo{} }
+func (f *fakeProbeStats) LinkStats() LinkStats   { return LinkStats{} }
+func (f *fakeProbeStats) Stats(context.Context) DeviceStats {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.polls++
+	if !f.hung && !f.silent {
+		f.last = time.Now()
+	}
+	return DeviceStats{}
+}
+func (f *fakeProbeStats) LastReply() time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.last
+}
+
+func fastProbe(t *testing.T) {
+	old := probeInterval
+	probeInterval = 5 * time.Millisecond
+	t.Cleanup(func() { probeInterval = old })
+}
+
+func expectReport(t *testing.T, died <-chan *modemState, want *modemState, within time.Duration) {
+	t.Helper()
+	select {
+	case got := <-died:
+		if got != want {
+			t.Fatal("reported a different modem than the one that died")
+		}
+	case <-time.After(within):
+		t.Fatal("dead modem not reported")
+	}
+}
+
+func expectNoReport(t *testing.T, died <-chan *modemState, within time.Duration) {
+	t.Helper()
+	select {
+	case <-died:
+		t.Fatal("reported a modem that had not died")
+	case <-time.After(within):
+	}
+}
+
+// A transport whose read loop exits (USB unplugged, TCP dropped) is reported,
+// and it reports the modem itself so the main loop can ignore a stale one.
+func TestWatchReportsDeadTransport(t *testing.T) {
+	dead := make(chan struct{})
+	ms := &modemState{modem: fakeWatchModem{dead}, stats: newSx12xxStatsProvider(RadioInfo{}), watchDone: make(chan struct{})}
+	defer ms.Close()
+	died := make(chan *modemState)
+	ms.watch(died)
+	close(dead)
+	expectReport(t, died, ms, time.Second)
+}
+
+// Closing a modem ends its read loop, which fires Dead(). A deliberate close,
+// on shutdown or SIGHUP, must not be taken for a fault and reconnected, even
+// when Close runs on another goroutine while a receiver is waiting: the main
+// loop receives and closes on one goroutine, so there a report could not be
+// delivered mid-Close anyway, and this is the case where close order matters.
+func TestWatchIgnoresDeliberateClose(t *testing.T) {
+	dead := make(chan struct{})
+	ms := &modemState{modem: fakeWatchModem{dead}, stats: newSx12xxStatsProvider(RadioInfo{}), watchDone: make(chan struct{}),
+		// Closing the modem is what fires Dead(), exactly as a real KISS
+		// transport's read loop exits on Close. The pause stands in for the
+		// rest of a real close, and gives the watcher time to act on Dead()
+		// before Close returns, which is the window the close order protects.
+		closers: []io.Closer{closerFunc(func() { close(dead); time.Sleep(10 * time.Millisecond) })}}
+	died := make(chan *modemState)
+	ms.watch(died)
+	go ms.Close()
+	expectNoReport(t, died, 100*time.Millisecond)
+}
+
+// A board that stays plugged in but stops answering never fires Dead(); the
+// probe catches it after probeMisses unanswered polls, and not before.
+func TestWatchProbeCatchesSilentBoard(t *testing.T) {
+	fastProbe(t)
+	st := &fakeProbeStats{}
+	ms := &modemState{modem: fakeWatchModem{make(chan struct{})}, stats: st, watchDone: make(chan struct{})}
+	defer ms.Close()
+	died := make(chan *modemState)
+	ms.watch(died)
+	expectNoReport(t, died, 50*time.Millisecond) // answering: no report
+
+	st.mu.Lock()
+	st.hung = true
+	hungAt := st.polls
+	st.mu.Unlock()
+	expectReport(t, died, ms, time.Second)
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if n := st.polls - hungAt; n < probeMisses {
+		t.Errorf("reported after %d unanswered polls, want at least %d", n, probeMisses)
+	}
+}
+
+// A modem that has never answered may simply not implement the queries: a
+// probe that reconnected it would reconnect a working radio forever.
+func TestWatchProbeLeavesNeverAnsweredModem(t *testing.T) {
+	fastProbe(t)
+	st := &fakeProbeStats{silent: true}
+	ms := &modemState{modem: fakeWatchModem{make(chan struct{})}, stats: st, watchDone: make(chan struct{})}
+	defer ms.Close()
+	died := make(chan *modemState)
+	ms.watch(died)
+	expectNoReport(t, died, 20*probeInterval*probeMisses)
+}
+
+// Close is called from error paths and teardown alike; a second call must not
+// panic on the already-closed watcher channel.
+func TestModemCloseIsIdempotent(t *testing.T) {
+	ms := &modemState{watchDone: make(chan struct{})}
+	ms.Close()
+	ms.Close()
 }
