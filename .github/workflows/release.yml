@@ -77,14 +77,32 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v6
+
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
 
+      # Extract this tag's own section from CHANGELOG.md. The heading must start
+      # with the exact tag ("## v1.2.0"); a trailing date or link is fine, but
+      # "## Release v1.2.0" yields an empty body and the release still succeeds
+      # with auto-generated notes only, so the failure is silent. An unknown tag
+      # yields an empty file, which action-gh-release treats as no body_path.
+      - name: Extract release notes
+        run: |
+          TAG="${{ github.ref_name }}"
+          awk -v tag="$TAG" '
+            $0 ~ "^## " tag "([^0-9.]|$)" { found = 1; print; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          echo "Extracted $(wc -l < RELEASE_NOTES.md) lines for $TAG"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          body_path: RELEASE_NOTES.md
           generate_release_notes: true
           files: artifacts/*
 

@@ -1,16 +1,21 @@
-# Connection Node type
-nodeType = "kiss"
-
-# Connection Settings
+# Which radio, chosen by scheme (nodeType is no longer needed and is ignored):
+#   serial:///dev/ttyACM0 or tcp://host:port        MeshCore KISS firmware
+#   openhop:///dev/ttyUSB0 or openhop://host:port   openHop Modem firmware
+#   spi://                                          bare SX1262 hat; set spiBoard
 connection = "serial:///dev/ttyACM0"
 baudRate = 115200
+# spiBoard = "rak6421-13300x-slot1"   # required for spi://, see README
+# modemToken = ""                     # openHop over TCP, if the modem has one
 
-# Radio Settings - Only for KISS
+# Radio Settings
 freq = 917.375
 bw = 62.50
 sf = 7
 cr = 8
 tx = 22
+# Transmit duty cycle, percent. Fractions allowed, so an EU868 0.1% sub-band
+# is expressible; NZ/AU 915-928 MHz has no duty-cycle limit. Default 50.
+# dutyCycle = 50
 
 [[bot]]
 name = "Ping Bot"

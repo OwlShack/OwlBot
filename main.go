@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -38,15 +37,51 @@ func (f closerFunc) Close() error { f(); return nil }
 type modemState struct {
 	modem       node.Modem
 	radioConfig *hardware.RadioConfig
-	stats       StatsProvider
-	recvErrors  *atomic.Uint64
+	// airtimeFactor is process-wide: one mux serves every bot and the observer.
+	airtimeFactor float64
+	// txSink is the current observer's tx hook. The modem's outbound handler is
+	// registered ONCE per modem and dispatches through here, because
+	// AddOutboundHandler has no removal: registering per observer would
+	// accumulate handlers pointing at dead observers on every reload.
+	txSink atomic.Pointer[func([]byte)]
+	stats  StatsProvider
+	// parseErrors counts frames that arrived intact and did not decode as a
+	// MeshCore packet. Published as packet_parse_errors, NOT recv_errors: the
+	// latter is the radio driver's failure-to-receive count and is polled from
+	// the firmware in stats.go.
+	parseErrors *atomic.Uint64
 	closers     []io.Closer
 }
+
+func (m *modemState) setTxSink(f func([]byte)) { m.txSink.Store(&f) }
+
+func (m *modemState) clearTxSink() { m.txSink.Store(nil) }
 
 func (m *modemState) Close() {
 	for i := len(m.closers) - 1; i >= 0; i-- {
 		m.closers[i].Close()
 	}
+}
+
+// muxOptions builds the mux options for the given modem state. Centralized so
+// startup and the SIGHUP reconnect path stay in sync.
+func muxOptions(ms *modemState) []node.MuxOption {
+	opts := []node.MuxOption{
+		node.WithMuxLogger(slog.Default()),
+		node.WithMuxErrorHandler(func(err error) {
+			slog.Debug("mux receive error", "component", "modem", "error", err)
+			ms.parseErrors.Add(1)
+		}),
+	}
+	if ms.radioConfig != nil {
+		// The budget only exists when an estimator is set, so the factor is
+		// only meaningful alongside it.
+		opts = append(opts,
+			node.WithMuxAirtimeEstimator(hardware.LoRaAirtimeEstimator(ms.radioConfig)),
+			node.WithMuxAirtimeFactor(ms.airtimeFactor),
+		)
+	}
+	return opts
 }
 
 func main() {
@@ -129,22 +164,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	muxOpts := []node.MuxOption{
-		node.WithMuxLogger(slog.Default()),
-		node.WithMuxErrorHandler(func(err error) {
-			slog.Debug("mux receive error", "component", "modem", "error", err)
-			ms.recvErrors.Add(1)
-		}),
-	}
-	if ms.radioConfig != nil {
-		muxOpts = append(muxOpts,
-			node.WithMuxAirtimeEstimator(hardware.LoRaAirtimeEstimator(ms.radioConfig)),
-			node.WithMuxRetryable(func(err error) bool {
-				return errors.Is(err, hardware.ErrTxBusy)
-			}),
-		)
-	}
-	mux := node.NewRadioMux(ms.modem, muxOpts...)
+	mux := node.NewRadioMux(ms.modem, muxOptions(ms)...)
 
 	bots, err := startBots(ctx, cfg, ms, mux)
 	if err != nil {
@@ -153,7 +173,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	observers, err := startObservers(ctx, cfg, mux, ms.stats, ms.recvErrors)
+	observers, err := startObservers(ctx, cfg, mux, ms)
 	if err != nil {
 		slog.Error("mqtt observer startup failed", "error", err)
 	}
@@ -193,17 +213,7 @@ func main() {
 					slog.Error("modem reconnect failed", "error", err)
 					os.Exit(1)
 				}
-				muxOpts = []node.MuxOption{
-					node.WithMuxLogger(slog.Default()),
-					node.WithMuxErrorHandler(func(err error) {
-						slog.Debug("mux receive error", "component", "modem", "error", err)
-						ms.recvErrors.Add(1)
-					}),
-				}
-				if ms.radioConfig != nil {
-					muxOpts = append(muxOpts, node.WithMuxAirtimeEstimator(hardware.LoRaAirtimeEstimator(ms.radioConfig)))
-				}
-				mux = node.NewRadioMux(ms.modem, muxOpts...)
+				mux = node.NewRadioMux(ms.modem, muxOptions(ms)...)
 			}
 
 			bots, err = startBots(ctx, newCfg, ms, mux)
@@ -212,7 +222,7 @@ func main() {
 				os.Exit(1)
 			}
 
-			observers, err = startObservers(ctx, newCfg, mux, ms.stats, ms.recvErrors)
+			observers, err = startObservers(ctx, newCfg, mux, ms)
 			if err != nil {
 				slog.Error("mqtt observer restart failed after reload", "error", err)
 			}
@@ -224,17 +234,26 @@ func main() {
 }
 
 func modemConfigChanged(old, new_ *Config) bool {
-	if derefStr(old.NodeType) != derefStr(new_.NodeType) {
-		return true
-	}
 	return derefStr(old.Connection) != derefStr(new_.Connection) ||
+		derefStr(old.SPIBoard) != derefStr(new_.SPIBoard) ||
+		derefStr(old.ModemToken) != derefStr(new_.ModemToken) ||
 		derefInt(old.BaudRate) != derefInt(new_.BaudRate) ||
 		derefFloat(old.Freq) != derefFloat(new_.Freq) ||
 		derefFloat(old.Bw) != derefFloat(new_.Bw) ||
 		derefUint8(old.SF) != derefUint8(new_.SF) ||
 		derefUint8(old.CR) != derefUint8(new_.CR) ||
-		derefUint8(old.TX) != derefUint8(new_.TX)
+		derefUint8(old.TX) != derefUint8(new_.TX) ||
+		old.effectiveAirtimeFactor() != new_.effectiveAirtimeFactor()
 }
+
+// ponytail: the airtime comparison above is exact float equality, deliberately.
+// Two cases, two reasons. An unchanged percent is bitwise identical because both
+// sides run the same computation on the same input. An unset config compared
+// against the equivalent explicit percent is exact only because
+// node.DefaultAirtimeFactor is 1.0, and both 50 and 1.0 are representable.
+// Ceiling: if that constant moves to a value whose percent is inexact, the
+// no-op case starts reporting a change and churns a modem reconnect on every
+// SIGHUP. Upgrade path then is an epsilon comparison, not before.
 
 func derefStr(p *string) string {
 	if p == nil {
@@ -264,83 +283,130 @@ func derefUint8(p *uint8) uint8 {
 	return *p
 }
 
+// rxHandlerWatchdog bounds how long one frame dispatch may take before the
+// modem warns and increments ModemStats.HandlerSlow.
+const rxHandlerWatchdog = 500 * time.Millisecond
+
 func setupModem(ctx context.Context, cfg *Config) (*modemState, error) {
 	ms := &modemState{
-		recvErrors: &atomic.Uint64{},
+		parseErrors:   &atomic.Uint64{},
+		airtimeFactor: cfg.effectiveAirtimeFactor(),
 	}
 
-	conn := *cfg.Connection
-	connScheme, connAddr, ok := parseConnection(conn)
-	if !ok {
-		return nil, fmt.Errorf("invalid connection string: %s", conn)
+	// validate has already checked the scheme; this cannot fail on a loaded config.
+	connScheme, connAddr, _ := parseConnection(*cfg.Connection)
+
+	ms.radioConfig = &hardware.RadioConfig{
+		FreqHz: uint32(*cfg.Freq * 1000000),
+		BwHz:   uint32(*cfg.Bw * 1000),
+		SF:     *cfg.SF,
+		CR:     *cfg.CR,
+	}
+	radio := RadioInfo{
+		FreqHz:  ms.radioConfig.FreqHz,
+		BwHz:    ms.radioConfig.BwHz,
+		SF:      ms.radioConfig.SF,
+		CR:      ms.radioConfig.CR,
+		TxPower: *cfg.TX,
 	}
 
-	switch *cfg.NodeType {
-	case "kiss":
-		var t hardware.Transport
+	// Log the duty cycle, not the factor: dutyCycle = 1/(1+factor) is
+	// inverted from the intuitive reading, so print the number an operator
+	// actually needs to compare against their region's limit.
+	slog.Info("airtime budget",
+		"factor", ms.airtimeFactor,
+		"duty_cycle_pct", 100/(1+ms.airtimeFactor))
 
-		switch connScheme {
-		case "serial":
-			t = kissTransport.NewSerialTransport(kissTransport.SerialConfig{
-				Port:     connAddr,
-				BaudRate: *cfg.BaudRate,
-			})
-		case "tcp":
-			t = kissTransport.NewTCPTransport(kissTransport.TCPConfig{
-				Address: connAddr,
-			})
-		}
-
-		radioConfig := &hardware.RadioConfig{
-			FreqHz: uint32(*cfg.Freq * 1000000),
-			BwHz:   uint32(*cfg.Bw * 1000),
-			SF:     *cfg.SF,
-			CR:     *cfg.CR,
-		}
-
-		kissModem := hardware.NewKissModem(
-			t,
-			hardware.WithSignalReport(true),
-			hardware.WithLogger(slog.Default()),
-		)
-
-		connectCtx, connectCancel := context.WithTimeout(ctx, 10*time.Second)
-		defer connectCancel()
-
-		if err := kissModem.Connect(connectCtx); err != nil {
-			return nil, fmt.Errorf("kiss connect: %w", err)
-		}
-		ms.closers = append(ms.closers, kissModem)
-
-		ms.radioConfig = radioConfig
-
-		if err := kissModem.SetRadio(radioConfig); err != nil {
-			ms.Close()
-			return nil, fmt.Errorf("SET_RADIO: %w", err)
-		}
-		slog.Info("SET_RADIO", "freq", *cfg.Freq, "bw", *cfg.Bw, "sf", *cfg.SF, "cr", *cfg.CR)
-
-		if err := kissModem.SetTxPower(*cfg.TX); err != nil {
-			ms.Close()
-			return nil, fmt.Errorf("SET_TX_POWER: %w", err)
-		}
-		slog.Info("SET_TX_POWER", "tx", *cfg.TX)
-
-		ms.stats = NewKissStatsProvider(kissModem, RadioInfo{
-			FreqHz:  uint32(*cfg.Freq * 1000000),
-			BwHz:    uint32(*cfg.Bw * 1000),
-			SF:      *cfg.SF,
-			CR:      *cfg.CR,
-			TxPower: *cfg.TX,
-		})
-
-		ms.modem = kissModem
-
+	var err error
+	switch connScheme {
+	case "spi":
+		err = setupSPI(ms, cfg, connAddr, radio)
+	case "openhop":
+		err = setupOpenhop(ctx, ms, cfg, connAddr, radio)
 	default:
-		return nil, fmt.Errorf("unsupported node type: %s (only \"kiss\" is supported)", *cfg.NodeType)
+		err = setupKiss(ctx, ms, cfg, connScheme, connAddr, radio)
 	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Registered once, for the life of this modem. Fires for every packet
+	// the process transmits, not just one virtual radio's. Every driver runs
+	// this on its send path (KISS under its send lock), so it must not block
+	// or send: the sink only counts and does a non-blocking enqueue.
+	ms.modem.AddOutboundHandler(func(data []byte) {
+		if f := ms.txSink.Load(); f != nil {
+			(*f)(data)
+		}
+	})
 
 	return ms, nil
+}
+
+// setupKiss connects to MeshCore KISS firmware over serial or TCP and
+// configures its radio.
+func setupKiss(ctx context.Context, ms *modemState, cfg *Config, connScheme, connAddr string, radio RadioInfo) error {
+	baud := 115200 // MeshCore's KISS modem firmware
+	if cfg.BaudRate != nil {
+		baud = *cfg.BaudRate
+	}
+
+	var t hardware.Transport
+	switch connScheme {
+	case "serial":
+		t = kissTransport.NewSerialTransport(kissTransport.SerialConfig{
+			Port:     connAddr,
+			BaudRate: baud,
+		})
+	case "tcp":
+		t = kissTransport.NewTCPTransport(kissTransport.TCPConfig{
+			Address: connAddr,
+		})
+	}
+
+	kissModem := hardware.NewKissModem(
+		t,
+		hardware.WithSignalReport(true),
+		hardware.WithLogger(slog.Default()),
+		// Flow control is already the library default; pinned explicitly so a
+		// change of default cannot silently un-serialize TX. The estimator is
+		// the part that matters: it sizes the TX_DONE wait from real
+		// time-on-air, which DefaultTxTimeout is too short for at high SF.
+		hardware.WithTxFlowControl(hardware.DefaultTxTimeout),
+		hardware.WithTxAirtimeEstimator(hardware.LoRaAirtimeEstimator(ms.radioConfig)),
+		// DATA frames dispatch serially on one goroutine, so a slow handler
+		// stalls RX for every bot. Dispatch should be sub-millisecond; this
+		// only fires on a real stall.
+		hardware.WithHandlerWatchdog(rxHandlerWatchdog),
+	)
+
+	kissModem.SetErrorHandler(func(err error) {
+		slog.Warn("modem error", "component", "modem", "error", err)
+	})
+
+	connectCtx, connectCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer connectCancel()
+
+	if err := kissModem.Connect(connectCtx); err != nil {
+		return fmt.Errorf("kiss connect: %w", err)
+	}
+	ms.closers = append(ms.closers, kissModem)
+
+	if err := kissModem.SetRadio(ms.radioConfig); err != nil {
+		ms.Close()
+		return fmt.Errorf("SET_RADIO: %w", err)
+	}
+	slog.Info("SET_RADIO", "freq", *cfg.Freq, "bw", *cfg.Bw, "sf", *cfg.SF, "cr", *cfg.CR)
+
+	if err := kissModem.SetTxPower(*cfg.TX); err != nil {
+		ms.Close()
+		return fmt.Errorf("SET_TX_POWER: %w", err)
+	}
+	slog.Info("SET_TX_POWER", "tx", *cfg.TX)
+
+	ms.stats = NewKissStatsProvider(kissModem, radio)
+	ms.modem = kissModem
+	return nil
 }
 
 func startBots(ctx context.Context, cfg *Config, ms *modemState, mux *node.RadioMux) ([]*Bot, error) {
@@ -370,7 +436,7 @@ func stopBots(bots []*Bot) {
 	}
 }
 
-func startObservers(ctx context.Context, cfg *Config, mux *node.RadioMux, stats StatsProvider, recvErrors *atomic.Uint64) ([]*MqttObserver, error) {
+func startObservers(ctx context.Context, cfg *Config, mux *node.RadioMux, ms *modemState) ([]*MqttObserver, error) {
 	obsCfg := botMqttConfig(cfg)
 	if obsCfg == nil {
 		return nil, nil
@@ -386,7 +452,7 @@ func startObservers(ctx context.Context, cfg *Config, mux *node.RadioMux, stats 
 		return nil, fmt.Errorf("mqtt identity: %w", err)
 	}
 
-	obs, err := NewMqttObserver(*obsCfg, mux, id, stats, recvErrors)
+	obs, err := NewMqttObserver(*obsCfg, mux, id, ms)
 	if err != nil {
 		return nil, fmt.Errorf("creating mqtt observer: %w", err)
 	}
@@ -410,6 +476,9 @@ func botMqttConfig(cfg *Config) *MqttConfig {
 
 func stopObservers(observers []*MqttObserver) {
 	for _, o := range observers {
+		if o.ms != nil {
+			o.ms.clearTxSink()
+		}
 		o.Stop()
 	}
 }
@@ -464,7 +533,7 @@ func loadConfigFromPath(path string) (*Config, error) {
 }
 
 func parseConnection(conn string) (scheme, addr string, ok bool) {
-	for _, prefix := range []string{"serial://", "tcp://"} {
+	for _, prefix := range []string{"serial://", "tcp://", "spi://", "openhop://"} {
 		if strings.HasPrefix(conn, prefix) {
 			return strings.TrimSuffix(prefix, "://"), conn[len(prefix):], true
 		}

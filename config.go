@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/meshcore-go/meshcore-go/node"
 	"github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
 )
@@ -104,10 +105,28 @@ type Config struct {
 	// Logging
 	LogLevel *string `json:"logLevel" yaml:"logLevel" toml:"logLevel"`
 
-	// Connection Settings (KISS firmware nodes only)
-	NodeType   *string `json:"nodeType" yaml:"nodeType" toml:"nodeType"`       // "kiss"
-	Connection *string `json:"connection" yaml:"connection" toml:"connection"` // serial://<path> or tcp://<host:port>
-	BaudRate   *int    `json:"baudRate" yaml:"baudRate" toml:"baudRate"`       // Default 115200 if using serial
+	// NodeType is IGNORED and kept only so existing configs still load: the
+	// connection scheme picks the modem. It was only ever "kiss", and a user
+	// moving to SPI would carry nodeType = "kiss" over from the old example,
+	// so honouring it would contradict the connection it sits beside.
+	NodeType *string `json:"nodeType" yaml:"nodeType" toml:"nodeType"`
+
+	// Connection picks the modem by scheme, the same strings OwlShack takes:
+	//   serial://<path> or tcp://<host:port>   MeshCore KISS firmware
+	//   openhop://<path> or openhop://<host:port>   openHop Modem firmware
+	//   spi://[<port>]   a bare SX1262 on this host's SPI bus; needs spiBoard
+	Connection *string `json:"connection" yaml:"connection" toml:"connection"`
+	// BaudRate is for KISS serial only, defaulting to 115200 there. openHop
+	// ignores it, because its firmware fixes 921600.
+	BaudRate *int `json:"baudRate" yaml:"baudRate" toml:"baudRate"`
+
+	// SPIBoard names the SPI hat, so its pins come from a vetted preset rather
+	// than being typed in one by one. Wrong pins give a silently dead radio.
+	SPIBoard *string `json:"spiBoard" yaml:"spiBoard" toml:"spiBoard"`
+
+	// ModemToken authenticates to an openHop modem over TCP. A password: kept
+	// out of Connection so it is not logged along with the connection string.
+	ModemToken *string `json:"modemToken" yaml:"modemToken" toml:"modemToken"`
 
 	// Radio Settings
 	Freq *float64 `json:"freq" yaml:"freq" toml:"freq"` // e.g. 917.375
@@ -115,6 +134,15 @@ type Config struct {
 	SF   *uint8   `json:"sf" yaml:"sf" toml:"sf"`       // e.g. 7
 	CR   *uint8   `json:"cr" yaml:"cr" toml:"cr"`       // e.g. 8
 	TX   *uint8   `json:"tx" yaml:"tx" toml:"tx"`       // TX Power e.g. 22
+
+	// DutyCycle is the transmit duty cycle as a percentage, named after the
+	// firmware's "set dutycycle". Unlike firmware it accepts fractions of a
+	// percent, so an EU868 0.1% sub-band is expressible here; firmware can only
+	// reach that through its raw, unvalidated "set af". Because percent covers
+	// the whole factor range continuously, there is no raw-factor key: a second
+	// setting could only restate this one, or disagree with it. Applies
+	// process-wide, since one mux is shared by every bot and the observer.
+	DutyCycle *float64 `json:"dutyCycle" yaml:"dutyCycle" toml:"dutyCycle"`
 
 	// Bots
 	Bots []BotConfig `json:"bots" yaml:"bots" toml:"bot"`
@@ -124,9 +152,7 @@ type Config struct {
 }
 
 func DefaultConfig() Config {
-	nodeType := "kiss"
 	connection := "serial:///dev/ttyACM0"
-	baudRate := 115200
 	freq := 917.375
 	bw := 62.50
 	sf := uint8(7)
@@ -134,9 +160,7 @@ func DefaultConfig() Config {
 	tx := uint8(2)
 
 	return Config{
-		NodeType:   &nodeType,
 		Connection: &connection,
-		BaudRate:   &baudRate,
 		Freq:       &freq,
 		Bw:         &bw,
 		SF:         &sf,
@@ -145,16 +169,21 @@ func DefaultConfig() Config {
 	}
 }
 
+// effectiveAirtimeFactor resolves the configured duty cycle to the factor the
+// radio mux takes, using the firmware's derivation (CommonCLI handleSetCmd).
+// Unset defers to the library constant rather than a hardcoded percent, so the
+// default stays exactly at firmware parity even if that constant moves.
+func (c *Config) effectiveAirtimeFactor() float64 {
+	if c.DutyCycle != nil {
+		return (100.0 / *c.DutyCycle) - 1.0
+	}
+	return node.DefaultAirtimeFactor
+}
+
 func (c *Config) applyDefaults() {
 	defaults := DefaultConfig()
-	if c.NodeType == nil {
-		c.NodeType = defaults.NodeType
-	}
 	if c.Connection == nil {
 		c.Connection = defaults.Connection
-	}
-	if c.BaudRate == nil {
-		c.BaudRate = defaults.BaudRate
 	}
 	if c.Freq == nil {
 		c.Freq = defaults.Freq
@@ -223,6 +252,24 @@ func (c *Config) validate() error {
 	}
 	if n > 1 {
 		return fmt.Errorf("at most one bot may define an mqtt section, found %d", n)
+	}
+	// Checked here, not at connect, so a bad connection on SIGHUP is a reload
+	// that keeps the running config rather than a modem setup that exits.
+	if c.Connection != nil {
+		scheme, _, ok := parseConnection(*c.Connection)
+		if !ok {
+			return fmt.Errorf("invalid connection %q: must start with serial://, tcp://, spi:// or openhop://", *c.Connection)
+		}
+		// This process drives the radio on SPI, so its pins are unknown
+		// rather than defaultable.
+		if scheme == "spi" && (c.SPIBoard == nil || *c.SPIBoard == "") {
+			return fmt.Errorf("connection %q needs spiBoard set", *c.Connection)
+		}
+	}
+	// Wider than firmware's 1-100 so sub-1% sub-bands are reachable, but still
+	// bounded: 0 or negative would divide by zero or invert the budget.
+	if c.DutyCycle != nil && (*c.DutyCycle <= 0 || *c.DutyCycle > 100) {
+		return fmt.Errorf("dutyCycle is a percentage, must be >0 and <=100, got %v", *c.DutyCycle)
 	}
 	return nil
 }
