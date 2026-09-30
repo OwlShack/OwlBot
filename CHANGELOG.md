@@ -3,7 +3,7 @@
 Notable changes per release. Dates are the tag date; unreleased work sits at the
 top until tagged.
 
-## Unreleased
+## v1.2.0 - 2026-09-30
 
 Baseline `v1.0.6`. openHop Modems and SPI radio hats join KISS firmware, the MQTT status now uses
 the firmware's own names and meanings, and brokers stay connected through outages and token
