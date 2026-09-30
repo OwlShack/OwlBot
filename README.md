@@ -225,7 +225,7 @@ Fires when a message is received on a channel that matches one of the `match` pa
 | `match` | Array of [Go regular expressions](https://pkg.go.dev/regexp/syntax) to match against incoming messages |
 | `template` | Go text/template for the response |
 | `retryTimeout` | Seconds to wait for a repeater echo before retrying | `5` |
-| `maxRetries` | Maximum number of send retries | `3` |
+| `maxRetries` | Total sends, counting the first: `3` sends once and resends up to twice | `3` |
 | `charLimitBehaviour` | What to do when a message exceeds the character limit: `"truncate"` or `"split"` | — |
 | `pathHashSize` | Path hash size: `0` = copy sender's setting, `1`/`2`/`3` = bytes per hash | `1` |
 
@@ -239,11 +239,11 @@ Fires on a schedule.
 | `channels` | Channels to send the message to |
 | `template` | Go text/template for the message |
 | `retryTimeout` | Seconds to wait for a repeater echo before retrying | `5` |
-| `maxRetries` | Maximum number of send retries | `3` |
+| `maxRetries` | Total sends, counting the first: `3` sends once and resends up to twice | `3` |
 | `charLimitBehaviour` | What to do when a message exceeds the character limit: `"truncate"` or `"split"` | — |
 | `pathHashSize` | Path hash size: `0` = copy sender's setting, `1`/`2`/`3` = bytes per hash | `1` |
 
-After sending a message, the bot listens for the message to be repeated back by a repeater. If no echo is heard within `retryTimeout` seconds, the message is re-sent, up to `maxRetries` times. This applies to both channel and cron triggers.
+After sending a message, the bot listens for the message to be repeated back by a repeater. If no echo is heard within `retryTimeout` seconds, the message is sent again, until it has been sent `maxRetries` times in all. This applies to both channel and cron triggers.
 
 ### Template Variables
 

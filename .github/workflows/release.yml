@@ -104,6 +104,9 @@ jobs:
         with:
           body_path: RELEASE_NOTES.md
           generate_release_notes: true
+          # A SemVer pre-release tag (v1.3.0-rc.1) is published as a
+          # pre-release, so it is not marked as the latest release.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: artifacts/*
 
   docker:
@@ -140,7 +143,9 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest
+            # Only a stable tag moves :latest. A pre-release (a tag containing a
+            # '-') gets its own version tag and leaves :latest alone.
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Build & Push
         uses: docker/build-push-action@v7
