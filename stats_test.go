@@ -97,8 +97,9 @@ func TestStatusMapsTxCountersDistinctly(t *testing.T) {
 	}
 }
 
-// rx_meta_misattributed is why this test exists: wrong SNR/RSSI attribution
-// feeds bad data into shared maps, so a mis-wired counter must fail here.
+// Each modem counter is pinned to its own key with a distinct value, so a
+// counter wired to the wrong key, which would report one fault as another,
+// fails here.
 func TestStatusMapsModemCounters(t *testing.T) {
 	// Through kissLinkStats, so the provider's mapping is covered as well as
 	// the wire's: a field wired wrong in either one fails here.

@@ -177,10 +177,14 @@ type statsBlock struct {
 	TxDroppedQueue uint64 `json:"tx_dropped_queue"` // enqueued faster than the radio drains; send less
 	TxFailed       uint64 `json:"tx_failed"`
 
-	RxDropped           uint64 `json:"rx_dropped"`      // inbound frames discarded on buffer overflow
-	HwErrors            uint64 `json:"hw_errors"`       // HW_RESP_ERROR frames from the firmware
-	HandlerSlow         uint64 `json:"handler_slow"`    // dispatches over the watchdog; RX runs serially, so these stall everyone
-	TxOutcomeLost       uint64 `json:"tx_outcome_lost"` // TX_DONE waits abandoned by a reconnect: sent or not is unknown
+	RxDropped     uint64 `json:"rx_dropped"`      // inbound frames discarded on buffer overflow
+	HwErrors      uint64 `json:"hw_errors"`       // HW_RESP_ERROR frames from the firmware
+	HandlerSlow   uint64 `json:"handler_slow"`    // dispatches over the watchdog; RX runs serially, so these stall everyone
+	TxOutcomeLost uint64 `json:"tx_outcome_lost"` // TX_DONE waits abandoned by a reconnect: sent or not is unknown
+	// A packet whose signal report never paired with it, published without
+	// SNR/RSSI: caught when the next packet arrived first, or when the 1 s wait
+	// ran out. Despite the first name, no SNR/RSSI was published wrongly: the
+	// pairing was refused, not made. Both mean frames lost on the modem link.
 	RxMetaMisattributed uint64 `json:"rx_meta_misattributed"`
 	RxMetaTimeouts      uint64 `json:"rx_meta_timeouts"`
 	HwDecodeErrors      uint64 `json:"hw_decode_errors"`

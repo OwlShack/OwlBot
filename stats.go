@@ -72,8 +72,18 @@ type LinkStats struct {
 	InboundDroppedOldest *uint64
 	HwErrors             *uint64 // HW_RESP_ERROR frames received
 	TxOutcomeLost        *uint64 // TX_DONE waits abandoned by a reconnect
-	RxMetaTimeouts       *uint64 // signal metadata never arrived
-	RxMetaMisattributed  *uint64 // signal metadata matched to the wrong packet
+	// Both count a packet whose separate signal-metadata frame never paired
+	// with it, so it is delivered with no SNR/RSSI. RxMetaTimeouts is the 1 s
+	// pairing wait running out. RxMetaMisattributed is the same loss caught
+	// sooner: the next packet arrived first, or a metadata frame arrived with
+	// no packet to go with. Despite its name, it counts a pairing the library
+	// REFUSED to make, so no published SNR/RSSI is ever wrong because of it.
+	// Floods arrive in bursts, so on a real mesh most losses land here, not in
+	// RxMetaTimeouts. Checked on hardware by dropping every second metadata
+	// frame: every affected packet published without SNR/RSSI, and every other
+	// one with exactly the firmware's values.
+	RxMetaTimeouts      *uint64
+	RxMetaMisattributed *uint64
 	// HwDecodeErrors is a malformed SETHARDWARE frame: the battery, temperature
 	// and noise-floor channel, not a mesh packet. Deliberately nil on SPI even
 	// though sx12xx.PacketsRecvErrors sounds similar: that is a DATA packet
