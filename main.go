@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -51,6 +52,10 @@ type modemState struct {
 	// the firmware in stats.go.
 	parseErrors *atomic.Uint64
 	closers     []io.Closer
+
+	// watchDone stops this modem's watchers (modem_watch.go).
+	watchDone chan struct{}
+	closeOnce sync.Once
 }
 
 func (m *modemState) setTxSink(f func([]byte)) { m.txSink.Store(&f) }
@@ -58,9 +63,17 @@ func (m *modemState) setTxSink(f func([]byte)) { m.txSink.Store(&f) }
 func (m *modemState) clearTxSink() { m.txSink.Store(nil) }
 
 func (m *modemState) Close() {
-	for i := len(m.closers) - 1; i >= 0; i-- {
-		m.closers[i].Close()
-	}
+	m.closeOnce.Do(func() {
+		// Watchers first: closing the modem ends its read loop, which fires
+		// Dead(), and a deliberate close is not a fault to reconnect from.
+		// watch() relies on this order when Close runs on another goroutine.
+		if m.watchDone != nil {
+			close(m.watchDone)
+		}
+		for i := len(m.closers) - 1; i >= 0; i-- {
+			m.closers[i].Close()
+		}
+	})
 }
 
 // muxOptions builds the mux options for the given modem state. Centralized so
@@ -158,34 +171,88 @@ func main() {
 	signal.Notify(sighup, syscall.SIGHUP)
 	defer signal.Stop(sighup)
 
-	ms, err := setupModem(ctx, cfg)
-	if err != nil {
-		slog.Error("modem setup failed", "error", err)
-		os.Exit(1)
+	// died carries the modem a watcher gave up on (modem_watch.go).
+	died := make(chan *modemState)
+
+	var (
+		ms        *modemState
+		mux       *node.RadioMux
+		bots      []*Bot
+		observers []*MqttObserver
+		// retry is armed while the radio is down; nil otherwise.
+		retry      <-chan time.Time
+		retryDelay = initialRadioRetry
+	)
+
+	// bringUp starts the radio and everything that hangs off it, leaving the
+	// running set untouched if it cannot.
+	bringUp := func(c *Config) error {
+		m, err := setupModem(ctx, c)
+		if err != nil {
+			return err
+		}
+		x := node.NewRadioMux(m.modem, muxOptions(m)...)
+		b, err := startBots(ctx, c, m, x)
+		if err != nil {
+			m.Close()
+			return fmt.Errorf("bot startup: %w", err)
+		}
+		o, err := startObservers(ctx, c, x, m)
+		if err != nil {
+			slog.Error("mqtt observer startup failed", "error", err)
+		}
+		m.watch(died)
+		ms, mux, bots, observers = m, x, b, o
+		retry, retryDelay = nil, initialRadioRetry
+		return nil
+	}
+	tearDown := func() {
+		stopObservers(observers)
+		stopBots(bots)
+		if ms != nil {
+			ms.Close()
+		}
+		ms, mux, bots, observers = nil, nil, nil, nil
+	}
+	// radioDown arms the next attempt. Retrying from the select rather than a
+	// blocking backoff loop keeps a SIGHUP carrying the operator's fix, a
+	// corrected port say, from queueing behind the retries.
+	radioDown := func(err error) {
+		retry = time.After(retryDelay)
+		slog.Warn("radio unavailable, retrying", "error", err, "retry_in", retryDelay)
+		retryDelay = min(retryDelay*2, maxRadioRetry)
 	}
 
-	mux := node.NewRadioMux(ms.modem, muxOptions(ms)...)
-
-	bots, err := startBots(ctx, cfg, ms, mux)
-	if err != nil {
-		ms.Close()
-		slog.Error("bot startup failed", "error", err)
+	// Startup still exits: a radio that never comes up is usually a config
+	// mistake, and failing loudly lets a supervisor show it.
+	if err := bringUp(cfg); err != nil {
+		slog.Error("radio setup failed", "error", err)
 		os.Exit(1)
-	}
-
-	observers, err := startObservers(ctx, cfg, mux, ms)
-	if err != nil {
-		slog.Error("mqtt observer startup failed", "error", err)
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			slog.Info("shutting down...")
-			stopObservers(observers)
-			stopBots(bots)
-			ms.Close()
+			tearDown()
 			return
+
+		case m := <-died:
+			if m != ms {
+				continue // a modem already replaced
+			}
+			slog.Error("radio lost, reconnecting")
+			tearDown()
+			if err := bringUp(cfg); err != nil {
+				radioDown(err)
+			}
+
+		case <-retry:
+			if err := bringUp(cfg); err != nil {
+				radioDown(err)
+			} else {
+				slog.Info("radio reconnected")
+			}
 
 		case <-sighup:
 			slog.Info("SIGHUP received, reloading config...")
@@ -201,20 +268,24 @@ func main() {
 				continue
 			}
 
+			// A new radio is needed when there is none (it is down and being
+			// retried) or its settings changed. That path retries rather than
+			// exits: the config has already passed validation, so a failure
+			// here is the device, not the file.
+			if ms == nil || modemConfigChanged(cfg, newCfg) {
+				slog.Info("reconnecting radio for the new config...")
+				tearDown()
+				cfg = newCfg
+				if err := bringUp(cfg); err != nil {
+					radioDown(err)
+					continue
+				}
+				slog.Info("config reloaded successfully")
+				continue
+			}
+
 			stopObservers(observers)
 			stopBots(bots)
-
-			if modemConfigChanged(cfg, newCfg) {
-				slog.Info("modem config changed, reconnecting...")
-				ms.Close()
-
-				ms, err = setupModem(ctx, newCfg)
-				if err != nil {
-					slog.Error("modem reconnect failed", "error", err)
-					os.Exit(1)
-				}
-				mux = node.NewRadioMux(ms.modem, muxOptions(ms)...)
-			}
 
 			bots, err = startBots(ctx, newCfg, ms, mux)
 			if err != nil {
@@ -291,6 +362,7 @@ func setupModem(ctx context.Context, cfg *Config) (*modemState, error) {
 	ms := &modemState{
 		parseErrors:   &atomic.Uint64{},
 		airtimeFactor: cfg.effectiveAirtimeFactor(),
+		watchDone:     make(chan struct{}),
 	}
 
 	// validate has already checked the scheme; this cannot fail on a loaded config.

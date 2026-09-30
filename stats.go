@@ -127,6 +127,12 @@ type kissStatsProvider struct {
 	// reply included; 0 means it has never answered.
 	lastReply atomic.Int64
 
+	// pollMu serialises Stats. The liveness probe and the MQTT status both
+	// poll, and two polls at once reopen the ordering trap documented in
+	// Stats: one poll's battery error would land on the other's counters
+	// request. One poll at a time keeps the proven order.
+	pollMu sync.Mutex
+
 	mu          sync.Mutex
 	recvErrors  *uint64 // nil until the firmware answers HW_CMD_GET_STATS
 	noiseFloor  int16
@@ -161,6 +167,15 @@ func NewKissStatsProvider(modem *hardware.KissModem, radio RadioInfo) *kissStats
 
 func (p *kissStatsProvider) answered() { p.lastReply.Store(time.Now().UnixNano()) }
 
+// LastReply is when the modem last answered anything; zero means never. It is
+// what starts the liveness probe in modem_watch.go.
+func (p *kissStatsProvider) LastReply() time.Time {
+	if ns := p.lastReply.Load(); ns != 0 {
+		return time.Unix(0, ns)
+	}
+	return time.Time{}
+}
+
 func (p *kissStatsProvider) RadioConfig() RadioInfo {
 	return p.radio
 }
@@ -189,6 +204,9 @@ func kissLinkStats(s hardware.ModemStats, recvErrors *uint64) LinkStats {
 }
 
 func (p *kissStatsProvider) Stats(ctx context.Context) DeviceStats {
+	p.pollMu.Lock()
+	defer p.pollMu.Unlock()
+
 	// Polled BEFORE the fire-and-forget queries below, and this ordering is
 	// load-bearing. FirmwareCounters is synchronous: it registers a waiter that
 	// completeHwRequest hands ANY non-TX_BUSY HW_RESP_ERROR to, whatever asked

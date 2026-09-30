@@ -10,6 +10,7 @@ A configurable bot framework for [MeshCore](https://github.com/meshcore-dev/Mesh
 - **Private channel support**: Join private channels using a hex-encoded PSK.
 - **MQTT integration**: Publish observed mesh traffic to MQTT brokers (e.g. [LetsMesh](https://letsmesh.net), [CoreScope](https://github.com/Kpa-clawbot/CoreScope)).
 - **Hot-reload**: Reload configuration via `SIGHUP` without restarting. Reconnects the modem if connection settings change.
+- **Radio reconnect**: If the radio is unplugged, its link drops, or it stops answering, the bot reconnects on its own and keeps retrying until the radio is back.
 - **Multi-bot support**: Run multiple bots within a single instance.
 - **Flexible configuration**: Supports TOML, YAML, and JSON formats.
 
@@ -418,6 +419,17 @@ kill -SIGHUP $(pgrep meshcore-bot)
 ```
 
 If the connection settings, radio parameters, `spiBoard` or `modemToken` change, the bot reconnects the radio.
+
+## Radio Reconnect
+
+The bot reconnects the radio on its own, and restarts its bots and MQTT observer when the radio is back:
+
+- **The link drops**, such as a KISS modem unplugged, a TCP connection lost, or an SPI radio that stops receiving. It reacts straight away.
+- **The radio stops answering** while its port stays open, as wedged firmware can. The bot checks every 30 seconds and reconnects after 3 checks go unanswered, so about 90 seconds.
+
+While the radio is down, the bot retries after 1 second, then waits twice as long each time, up to 30 seconds between tries. MQTT shows the node as `offline` until the radio is back. If the fix is a config change, such as a different port, send `SIGHUP` and it is used at once rather than at the next retry.
+
+openHop Modems reconnect a dropped link inside their own driver, so for them only the answering check applies. If the radio can't be reached when the bot first starts, it exits with an error instead.
 
 ## License
 

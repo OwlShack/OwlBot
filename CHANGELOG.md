@@ -40,6 +40,10 @@ Config adds the `openhop://` and `spi://` connections and the `spiBoard`, `modem
   unchanged, and the duty cycle in use is logged at startup.
 - **Slow message handling is logged and counted.** One slow reply holds up every bot's receiving,
   so any that takes over half a second is logged and counted in `stats.handler_slow`.
+- **The bot reconnects a radio that is lost.** An unplugged modem, a dropped link, or a radio that
+  stops answering for about 90 seconds is reconnected on its own, with retries up to every 30
+  seconds, and the bots and MQTT status come back with it. Before, the bot kept running but heard
+  and sent nothing until it was restarted.
 
 ### Changed
 
