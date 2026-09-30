@@ -6,9 +6,7 @@ A configurable bot framework for [MeshCore](https://github.com/meshcore-dev/Mesh
 
 - **Trigger-based architecture**: Respond to group messages, private channel messages, or on a cron schedule.
 - **Go template responses**: Access mesh data like sender, hops, path hashes, SNR, RSSI, and more.
-- **Two node types**:
-  - **KISS** (recommended): Direct radio control via hardware.
-  - **Companion** (experimental): Piggyback on an existing MeshCore device via the companion client.
+- **Three kinds of radio**: MeshCore KISS firmware over USB or TCP, [openHop Modem](https://github.com/openhop-dev) firmware over USB or TCP, or a bare SX1262 hat on a Raspberry Pi's SPI bus. The same modems [OwlShack](https://github.com/meshcore-go/OwlShack) supports, publishing the same MQTT schema.
 - **Private channel support**: Join private channels using a hex-encoded PSK.
 - **MQTT integration**: Publish observed mesh traffic to MQTT brokers (e.g. [LetsMesh](https://letsmesh.net), [CoreScope](https://github.com/Kpa-clawbot/CoreScope)).
 - **Hot-reload**: Reload configuration via `SIGHUP` without restarting. Reconnects the modem if connection settings change.
@@ -70,7 +68,6 @@ Log out and back in (or reboot) for the change to take effect.
 Create a file called `config.toml` in the same folder as the binary. Here's a minimal example that responds to "ping" on the `#testing` channel:
 
 ```toml
-nodeType = "kiss"
 connection = "serial:///dev/ttyACM0"
 
 freq = 917.375
@@ -108,7 +105,7 @@ docker run -d \
   ghcr.io/meshcore-go/meshcore-bot
 ```
 
-For TCP connections (e.g. companion mode via a serial-to-TCP bridge), no `--device` is needed:
+For TCP connections (e.g. a serial-to-TCP bridge to the KISS device), no `--device` is needed:
 
 ```bash
 docker run -d \
@@ -132,12 +129,14 @@ docker run -d \
 
 | Field | Description | Default |
 |-------|-------------|---------|
-| `nodeType` | `"kiss"` (direct radio) or `"companion"` (piggyback on existing device) | `"kiss"` |
-| `connection` | `serial:///dev/ttyACM0` or `tcp://host:port` | `serial:///dev/ttyACM0` |
-| `baudRate` | Serial baud rate | `115200` |
+| `connection` | Which radio, chosen by scheme. See [Radios](#radios) below. | `serial:///dev/ttyACM0` |
+| `baudRate` | Serial baud rate for KISS. Ignored for openHop, whose firmware is fixed at 921600. | `115200` |
+| `spiBoard` | The SPI hat, by name. Required for `spi://`. | |
+| `modemToken` | Password for an openHop modem over TCP. Kept out of `connection` so it is not logged with it. | |
+| `nodeType` | Ignored. Kept so older configs still load; the `connection` scheme picks the radio. | |
 | `logLevel` | Log level: `debug`, `info`, `warn`, `error`, `trace` (overridden by `-v` flags) | `info` |
 
-### Radio Settings (KISS only)
+### Radio Settings
 
 | Field | Description | Default |
 |-------|-------------|---------|
@@ -146,6 +145,46 @@ docker run -d \
 | `sf` | Spreading Factor | `7` |
 | `cr` | Coding Rate | `8` |
 | `tx` | TX Power | `2` |
+| `dutyCycle` | Transmit duty cycle as a percentage, greater than `0` and up to `100`. Named after the firmware's `set dutycycle`, but fractions are allowed: `0.1` is valid, which firmware's own knob rejects. Check your region's limit: EU868 sub-bands are capped at `1` or `0.1`, while NZ/AU 915-928 MHz has no duty-cycle limit. Applies process-wide (one radio mux serves every bot and the observer). | `50` |
+
+### Radios
+
+The `connection` scheme picks the radio:
+
+| Connection | Radio |
+|---|---|
+| `serial:///dev/ttyACM0`, `tcp://host:port` | MeshCore KISS modem firmware |
+| `openhop:///dev/ttyUSB0`, `openhop://host:port` | openHop Modem firmware. Over TCP, set `modemToken` if the modem has one. The driver reconnects on its own if the link drops. |
+| `spi://` | A bare SX1262 on this host's SPI bus, with no firmware in front of it: the bot is the radio stack. Needs `spiBoard`. |
+
+**SPI hats.** The pins come from a named preset, because a wrong pin gives a radio that is silently dead rather than one that errors. `spi://` on its own uses the board's own SPI device; `spi://SPI0.1` or `spi:///dev/spidev0.1` overrides it, with a warning if it disagrees with the board. `tx` is checked against the module's rating and refused above it rather than clamped. Boards marked `community` log a warning at startup: their pin maps come from other projects and have not been run on the hat here.
+
+| `spiBoard` | Hat | Max TX | Pins |
+|---|---|---|---|
+| `bq-station-g3` | BQ Voyage Station G3 | 19 dBm | community |
+| `meshadv` | MeshAdv | 22 dBm | community |
+| `nebra-duo-hat` | NebraDuo-E22P-1W | 18 dBm | community |
+| `nebrahat` | NebraHat-2W | 8 dBm | community |
+| `pimesh-1w-v1` | PiMesh-1W (V1) | 18 dBm | community |
+| `pimesh-1w-v2` | PiMesh-1W (V2) | 18 dBm | community |
+| `rak6421-13300x-slot1` | RAK6421 with RAK1330x, IO slot 1 | 22 dBm | hardware |
+| `rak6421-13300x-slot2` | RAK6421 with RAK1330x, IO slot 2 | 22 dBm | hardware |
+| `uconsole-aio-v2` | uConsole LoRa Module aio v2 | 22 dBm | community |
+| `ultrapeaterzero-e22` | Zindello UltraPeaterZero (E22, 1 W) | 22 dBm | hardware |
+| `ultrapeaterzero-e22p` | Zindello UltraPeaterZero (E22P, 1 W) | 22 dBm | hardware |
+| `waveshare` | Waveshare LoRa HAT | 22 dBm | community |
+| `zebra` | ZebraHat-1W | 18 dBm | community |
+| `zebra-duo-hat-r0` | ZebraHatDuo-R0-1W | 18 dBm | community |
+| `zebra-duo-hat-r1` | ZebraHatDuo-R1-1W | 18 dBm | community |
+
+To add a hat, or correct a pin map without waiting for a release, put a `boards.json` in the working directory. Entries are merged over the presets by name and re-read on `SIGHUP`. The format is the one in [modem_boards.json](modem_boards.json).
+
+On Raspberry Pi OS, enable SPI (`sudo raspi-config`, Interface Options) and add your user to the `spi` and `gpio` groups. SPI has not been tested under Docker; run the binary on the Pi directly.
+
+```toml
+connection = "spi://"
+spiBoard = "rak6421-13300x-slot1"
+```
 
 ### Triggers
 
@@ -232,7 +271,6 @@ After sending a message, the bot listens for the message to be repeated back by 
 ### KISS Node with Private Channel
 
 ```toml
-nodeType = "kiss"
 connection = "serial:///dev/ttyACM0"
 baudRate = 115200
 
@@ -253,22 +291,6 @@ match = ["(?i)^test", "(?i)^ping"]
 [[bot.trigger.channels]]
 name = "MyPrivateChannel"
 privateKey = "7d78eab105a663ab3504d99a0e5b1891"
-```
-
-### Companion Node
-
-```toml
-nodeType = "companion"
-connection = "tcp://127.0.0.1:8001"
-
-[[bot]]
-name = "Companion Bot"
-
-[[bot.trigger]]
-type = "channel"
-template = "I am running via companion! Hello {{.Sender}}"
-channels = ["#testing"]
-match = ["(?i)^!hello"]
 ```
 
 ### Cron Trigger
@@ -293,22 +315,27 @@ template = "Periodic update: The time is {{.Time}}"
 
 meshcore-bot can publish observed mesh traffic to MQTT brokers. This is used by services like [LetsMesh](https://letsmesh.net) to aggregate mesh network data.
 
-Each `[[observer]]` defines an MQTT observer node that forwards packets to one or more brokers. A unique identity key file is used for authentication.
+MQTT lives under exactly one bot: define an optional `[bot.mqtt]` section on a single `[[bot]]`. At most one bot in the whole config may have it. A unique identity key file is used for authentication.
+
+Configs from before this change (root-level `[[observer]]` blocks) are migrated automatically on first load: observers merge into the first bot's `[bot.mqtt]`, and the original file is backed up alongside as `config.toml.bak-<timestamp>` (the rewrite loses comments). A config with both formats fails loudly instead of guessing.
 
 ```toml
-[[observer]]
+[[bot]]
 name = "AKL Bot"
+
+[bot.mqtt]
+name = "AKL Observer"
 iataCode = "AKL"
 keyFile = "mqtt_identity.key"
 statusInterval = 300
 
-[observer.advert]
+[bot.mqtt.advert]
 enabled = true
 interval = 86400
 lat = -36.8485
 lon = 174.7633
 
-[[observer.broker]]
+[[bot.mqtt.broker]]
 name = "US West (LetsMesh v1)"
 enabled = true
 transport = "wss"
@@ -320,7 +347,7 @@ tlsEnabled = true
 authType = "token"
 audience = "mqtt-us-v1.letsmesh.net"
 
-[[observer.broker]]
+[[bot.mqtt.broker]]
 name = "Europe (LetsMesh v1)"
 enabled = true
 transport = "wss"
@@ -332,7 +359,7 @@ tlsEnabled = true
 authType = "token"
 audience = "mqtt-eu-v1.letsmesh.net"
 
-[[observer.broker]]
+[[bot.mqtt.broker]]
 name = "CoreScope NZ"
 enabled = true
 transport = "wss"
@@ -345,7 +372,7 @@ authType = "token"
 audience = "meshcore-mqtt-1.baird.io"
 ```
 
-| Observer Field | Description |
+| MQTT Field | Description |
 |----------------|-------------|
 | `name` | Display name for this observer |
 | `iataCode` | Location identifier (e.g. airport code) |
@@ -380,7 +407,7 @@ audience = "meshcore-mqtt-1.baird.io"
 | `lat` | Latitude in decimal degrees (optional) |
 | `lon` | Longitude in decimal degrees (optional) |
 
-When enabled, the observer broadcasts a signed companion advert over the mesh on startup and then repeats at the configured interval. This allows the node to appear in the mesh network as a visible participant. If `lat` and `lon` are provided, the advert includes location data.
+When enabled, the observer broadcasts a signed chat-node advert over the mesh on startup and then repeats at the configured interval. This allows the node to appear in the mesh network as a visible participant. If `lat` and `lon` are provided, the advert includes location data.
 
 ## Hot Reload
 
@@ -390,7 +417,7 @@ Send a `SIGHUP` signal to the process to reload the configuration without restar
 kill -SIGHUP $(pgrep meshcore-bot)
 ```
 
-If the connection settings or radio parameters change, the bot will automatically reconnect.
+If the connection settings, radio parameters, `spiBoard` or `modemToken` change, the bot reconnects the radio.
 
 ## License
 

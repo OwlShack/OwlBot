@@ -7,25 +7,14 @@ import (
 	"text/template"
 )
 
-// Provider exposes template functions (e.g. {{weather "Auckland"}}, {{capAlerts "Northland"}}).
-type Provider interface {
-	FuncMap() template.FuncMap
-}
-
 type Templater struct {
 	funcMap template.FuncMap
 }
 
-func NewTemplater(providers ...Provider) *Templater {
-	funcMap := template.FuncMap{
+func NewTemplater() *Templater {
+	return &Templater{funcMap: template.FuncMap{
 		"formatPathBytes": formatPathBytes,
-	}
-	for _, p := range providers {
-		for k, v := range p.FuncMap() {
-			funcMap[k] = v
-		}
-	}
-	return &Templater{funcMap: funcMap}
+	}}
 }
 
 func (t *Templater) Render(event *TriggerEvent, tmplStr string) (string, error) {
