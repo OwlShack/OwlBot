@@ -37,6 +37,9 @@ type brokerClient struct {
 	stop       chan struct{} // closed by Stop to halt the worker; publishCh is never closed, so an in-flight send can't panic
 	workerDone chan struct{}
 	dropped    atomic.Uint64
+	// downDropped counts packets dropped since the broker went unreachable.
+	// Only publishWorker touches it.
+	downDropped uint64
 	// retrying is true while a connectAndRetry loop owns this broker. Needed
 	// now that BOTH Start and a failed token refresh can spawn one: without it
 	// two loops race on the same client pointer and both swapClient.
@@ -430,10 +433,16 @@ func (o *MqttObserver) publishWorker(bc *brokerClient) {
 
 func (o *MqttObserver) doPublish(bc *brokerClient, job publishJob) {
 	client := bc.currentClient()
-	if client == nil || !client.IsConnected() {
+	// IsConnected stays true while paho auto-reconnects, and paho then
+	// completes a QoS 0 publish without sending or storing it. Drop those here
+	// too, so the outage is counted and logged rather than silent.
+	if client == nil || !client.IsConnected() || (job.qos == 0 && !client.IsConnectionOpen()) {
 		// Publishing to a disconnected client blocks for the full
-		// publishWaitTimeout per job and stalls the worker.
-		bc.dropped.Add(1)
+		// publishWaitTimeout per job and stalls the worker. No buffer: a
+		// packet heard while the broker is down is not sent later.
+		if bc.downDropped++; bc.downDropped == 1 {
+			o.log.Warn("broker not connected, dropping packets until it is", "broker", bc.cfg.Name)
+		}
 		return
 	}
 	token := client.Publish(job.topic, job.qos, job.retain, job.payload)
@@ -443,6 +452,11 @@ func (o *MqttObserver) doPublish(bc *brokerClient, job publishJob) {
 	}
 	if err := token.Error(); err != nil {
 		o.log.Error("publish error", "broker", bc.cfg.Name, "error", err)
+		return
+	}
+	if bc.downDropped > 0 {
+		o.log.Info("broker publishing again", "broker", bc.cfg.Name, "dropped", bc.downDropped)
+		bc.downDropped = 0
 	}
 }
 
