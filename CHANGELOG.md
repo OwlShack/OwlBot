@@ -13,6 +13,8 @@ Baseline `v1.2.0`. meshcore-bot is now OwlBot, and lives at
 - **Templates can print dates and times.** `{{date now "15:04"}}` gives the current time, and
   `{{date .Timestamp "15:04"}}` when a channel message was sent. An optional zone such as
   `"Pacific/Auckland"` sets the time zone, and works the same on every platform.
+- **Choose how path hashes are joined.** `{{formatPathBytes .PathHashes " > "}}` gives
+  `A1 > B2 > C3` instead of the default `A1, B2, C3`.
 
 ### Changed
 

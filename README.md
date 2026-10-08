@@ -277,9 +277,22 @@ After sending a message, the bot listens for the message to be repeated back by 
 - `{{.Schedule}}` — The cron schedule string
 
 **Built-in Functions:**
-- `formatPathBytes`: formats raw path hashes into a readable string.
+- `formatPathBytes`: formats raw path hashes into a readable string, joined by an optional separator (`Direct` when there is no path).
 - `now`: the current time, as a value you can format or take parts of.
 - `date`: formats a time in a layout, optionally in a named zone.
+
+`formatPathBytes` takes the path hashes and an optional separator, defaulting
+to `", "`:
+
+```
+{{formatPathBytes .PathHashes}}          A1, B2, C3
+{{formatPathBytes .PathHashes " > "}}    A1 > B2 > C3
+{{formatPathBytes .PathHashes ""}}       A1B2C3
+```
+
+A node heard direct renders as `Direct` whatever the separator, since there is
+nothing to join. The pipe form `{{.PathHashes | formatPathBytes}}` still works
+but cannot take a separator, because a pipe passes its value as the last argument.
 
 `date` takes a time, a layout, and an optional [IANA zone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones);
 without a zone it uses the host's. Layouts are Go's, where the layout is itself
