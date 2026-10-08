@@ -22,9 +22,10 @@ type brokerClient struct {
 	mu     sync.Mutex // guards client (swapped by tokenRefreshLoop while the publish worker uses it)
 	client mqtt.Client
 
-	pubKeyHx string
-	iata     string
-	prefix   string
+	pubKeyHx    string
+	iata        string
+	packetTopic string
+	statusTopic string
 
 	disallowed map[byte]bool
 	// One cache per direction. A packet we transmit that we already published
@@ -83,14 +84,6 @@ type publishJob struct {
 	payload []byte
 	qos     byte
 	retain  bool
-}
-
-func (b *brokerClient) packetTopic() string {
-	return fmt.Sprintf("%s/%s/%s/packets", b.prefix, b.iata, b.pubKeyHx)
-}
-
-func (b *brokerClient) statusTopic() string {
-	return fmt.Sprintf("%s/%s/%s/status", b.prefix, b.iata, b.pubKeyHx)
 }
 
 func (b *brokerClient) isAllowed(payloadType byte) bool {
@@ -176,20 +169,18 @@ func (o *MqttObserver) Start(ctx context.Context) error {
 		}
 
 		disallowed := parseDisallowed(bcfg.DisallowedPacketTypes)
-		prefix := bcfg.TopicPrefix
-		if prefix == "" {
-			prefix = "meshcore"
-		}
+		packetTopic, statusTopic := resolveTopics(bcfg, iata, o.pubKeyHx, o.originName)
 
 		bc := &brokerClient{
-			cfg:        bcfg,
-			pubKeyHx:   o.pubKeyHx,
-			iata:       iata,
-			prefix:     prefix,
-			disallowed: disallowed,
-			publishCh:  make(chan publishJob, publishQueueDepth),
-			stop:       make(chan struct{}),
-			workerDone: make(chan struct{}),
+			cfg:         bcfg,
+			pubKeyHx:    o.pubKeyHx,
+			iata:        iata,
+			packetTopic: packetTopic,
+			statusTopic: statusTopic,
+			disallowed:  disallowed,
+			publishCh:   make(chan publishJob, publishQueueDepth),
+			stop:        make(chan struct{}),
+			workerDone:  make(chan struct{}),
 		}
 		if bcfg.Dedup {
 			bc.dedupRx = &meshcore.DedupCache{}
@@ -405,8 +396,8 @@ func (o *MqttObserver) publishPacket(pkt *meshcore.Packet, rawBytes []byte, dire
 			continue
 		}
 		o.log.Log(context.Background(), LevelTrace, "queuing packet",
-			"broker", bc.cfg.Name, "topic", bc.packetTopic(), "direction", direction)
-		o.enqueuePublish(bc, publishJob{topic: bc.packetTopic(), payload: payload})
+			"broker", bc.cfg.Name, "topic", bc.packetTopic, "direction", direction)
+		o.enqueuePublish(bc, publishJob{topic: bc.packetTopic, payload: payload})
 	}
 }
 
@@ -679,7 +670,7 @@ func (o *MqttObserver) publishStatus(ctx context.Context, bc *brokerClient, stat
 	}
 
 	o.log.Log(ctx, LevelTrace, "publishing status",
-		"broker", bc.cfg.Name, "topic", bc.statusTopic(),
+		"broker", bc.cfg.Name, "topic", bc.statusTopic,
 		"json", string(payload))
 	// Queued, not published inline. A bare token.Wait() here was unbounded:
 	// Stop passes a 5s context but it never reaches the token, so an
@@ -687,7 +678,7 @@ func (o *MqttObserver) publishStatus(ctx context.Context, bc *brokerClient, stat
 	// The worker path is bounded by publishWaitTimeout, and it is also the one
 	// place the nil/disconnected client is handled, so no guard is needed here.
 	o.enqueuePublish(bc, publishJob{
-		topic:   bc.statusTopic(),
+		topic:   bc.statusTopic,
 		payload: payload,
 		qos:     1,
 		retain:  bc.cfg.RetainStatus,
@@ -746,11 +737,7 @@ func (o *MqttObserver) connectBroker(bcfg BrokerConfig, iata string) (mqtt.Clien
 		opts.SetPassword(bcfg.Password)
 	}
 
-	prefix := bcfg.TopicPrefix
-	if prefix == "" {
-		prefix = "meshcore"
-	}
-	statusTopic := fmt.Sprintf("%s/%s/%s/status", prefix, iata, o.pubKeyHx)
+	_, statusTopic := resolveTopics(bcfg, iata, o.pubKeyHx, o.originName)
 
 	// LWT uses minimal status (no live stats — we're about to disconnect).
 	offlinePayload, _ := formatStatus("offline", o.originName, o.pubKeyHx, RadioInfo{}, DeviceStats{}, PacketCounts{}, 0, linkHealth{})

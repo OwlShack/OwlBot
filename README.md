@@ -467,7 +467,8 @@ audience = "meshcore-mqtt-1.baird.io"
 | `host` | Broker hostname |
 | `port` | Broker port |
 | `path` | WebSocket path (default: none) |
-| `topicPrefix` | MQTT topic prefix |
+| `topicPrefix` | MQTT topic prefix, used when `packetTopic` or `statusTopic` is unset (default: `meshcore`) |
+| `packetTopic` / `statusTopic` | Topic templates with `{iata}` `{pubkey}` `{name}` (uppercase also works). Unset = `<topicPrefix>/{iata}/{pubkey}/packets` (resp. `/status`) |
 | `disallowedPacketTypes` | Packet types to exclude (e.g. `["ack", "advert"]`) |
 | `retainStatus` | Retain status messages on the broker |
 | `tlsEnabled` | Enable TLS |
@@ -476,6 +477,21 @@ audience = "meshcore-mqtt-1.baird.io"
 | `username` | Username for basic auth |
 | `password` | Password for basic auth |
 | `audience` | Token audience (for token auth) |
+
+Topics default to the layout LetsMesh and meshcoretomqtt use. A broker that expects another layout can set its own; `{name}` is the observer's `name`. The offline message the broker publishes if the bot drops off uses `statusTopic` too:
+
+```toml
+[[bot.mqtt.broker]]
+name = "home"
+enabled = true
+host = "192.168.1.10"
+port = 1883
+authType = "none"
+packetTopic = "mesh/{iata}/{name}/packets"
+statusTopic = "mesh/{iata}/{name}/status"
+```
+
+A template with an unknown placeholder or an MQTT wildcard (`+`, `#`) stops the bot loading, and a `SIGHUP` reload with one keeps the running config.
 
 | Advert Field | Description |
 |--------------|-------------|
