@@ -51,15 +51,23 @@ func (t *Templater) Render(event *TriggerEvent, tmplStr string) (string, error) 
 	return result, nil
 }
 
-func formatPathBytes(paths [][]byte) string {
+// formatPathBytes renders raw path hashes, joined by an optional separator rather than the default ", ".
+func formatPathBytes(paths [][]byte, sep ...string) (string, error) {
+	if len(sep) > 1 {
+		return "", fmt.Errorf("formatPathBytes: want at most one separator, got %d", len(sep))
+	}
 	if len(paths) == 0 {
-		return "Direct"
+		return "Direct", nil
+	}
+	joiner := ", "
+	if len(sep) == 1 {
+		joiner = sep[0]
 	}
 	parts := make([]string, len(paths))
 	for i, p := range paths {
 		parts[i] = fmt.Sprintf("%02X", p)
 	}
-	return strings.Join(parts, ", ")
+	return strings.Join(parts, joiner), nil
 }
 
 // formatDate renders a time in a layout, optionally in a named IANA zone rather than the host's.
