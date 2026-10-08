@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
+	meshcore "github.com/OwlShack/meshcore-go"
+	"github.com/OwlShack/meshcore-go/hardware"
+	"github.com/OwlShack/meshcore-go/node"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	meshcore "github.com/meshcore-go/meshcore-go"
-	"github.com/meshcore-go/meshcore-go/hardware"
-	"github.com/meshcore-go/meshcore-go/node"
 )
 
 func decodePacket(t *testing.T, pkt *meshcore.Packet, raw []byte, dir string, radio RadioInfo) map[string]any {

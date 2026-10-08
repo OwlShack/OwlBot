@@ -61,15 +61,15 @@ jobs:
           if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
           SUFFIX="${GOOS}-${GOARCH}"
           if [ -n "$GOARM" ]; then SUFFIX="${SUFFIX}v${GOARM}"; fi
-          OUTPUT="meshcore-bot-${SUFFIX}${EXT}"
+          OUTPUT="OwlBot-${SUFFIX}${EXT}"
           CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o "${OUTPUT}" .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         if: ${{ !env.ACT }}
         with:
-          name: meshcore-bot-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('v{0}', matrix.goarm) || '' }}
-          path: meshcore-bot-*
+          name: OwlBot-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('v{0}', matrix.goarm) || '' }}
+          path: OwlBot-*
 
   release:
     name: Create Release
@@ -119,7 +119,7 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          pattern: meshcore-bot-linux-*
+          pattern: OwlBot-linux-*
           path: docker/bin
           merge-multiple: false
 

@@ -1,12 +1,12 @@
-# meshcore-bot
+# OwlBot
 
-A configurable bot framework for [MeshCore](https://github.com/meshcore-dev/MeshCore) mesh networks, built with the pure Go [meshcore-go](https://github.com/meshcore-go/meshcore-go) library.
+A configurable bot framework for [MeshCore](https://github.com/meshcore-dev/MeshCore) mesh networks, built with the pure Go [meshcore-go](https://github.com/OwlShack/meshcore-go) library. Formerly meshcore-bot: see [Upgrading from meshcore-bot](#upgrading-from-meshcore-bot).
 
 ## Features
 
 - **Trigger-based architecture**: Respond to group messages, private channel messages, or on a cron schedule.
 - **Go template responses**: Access mesh data like sender, hops, path hashes, SNR, RSSI, and more.
-- **Three kinds of radio**: MeshCore KISS firmware over USB or TCP, [openHop Modem](https://github.com/openhop-dev) firmware over USB or TCP, or a bare SX1262 hat on a Raspberry Pi's SPI bus. The same modems [OwlShack](https://github.com/meshcore-go/OwlShack) supports, publishing the same MQTT schema.
+- **Three kinds of radio**: MeshCore KISS firmware over USB or TCP, [openHop Modem](https://github.com/openhop-dev) firmware over USB or TCP, or a bare SX1262 hat on a Raspberry Pi's SPI bus. The same modems [OwlShack](https://github.com/OwlShack/OwlShack) supports, publishing the same MQTT schema.
 - **Private channel support**: Join private channels using a hex-encoded PSK.
 - **MQTT integration**: Publish observed mesh traffic to MQTT brokers (e.g. [LetsMesh](https://letsmesh.net), [CoreScope](https://github.com/Kpa-clawbot/CoreScope)).
 - **Hot-reload**: Reload configuration via `SIGHUP` without restarting. Reconnects the modem if connection settings change.
@@ -18,34 +18,34 @@ A configurable bot framework for [MeshCore](https://github.com/meshcore-dev/Mesh
 
 ### Download a Release Binary (Recommended)
 
-Pre-built binaries are available for Linux, macOS, and Windows on the [Releases](https://github.com/meshcore-go/meshcore-bot/releases) page.
+Pre-built binaries are available for Linux, macOS, and Windows on the [Releases](https://github.com/OwlShack/OwlBot/releases) page.
 
-1. Go to the [latest release](https://github.com/meshcore-go/meshcore-bot/releases/latest).
-2. Download the binary for your platform (e.g. `meshcore-bot-linux-arm64` for a Raspberry Pi).
+1. Go to the [latest release](https://github.com/OwlShack/OwlBot/releases/latest).
+2. Download the binary for your platform (e.g. `OwlBot-linux-arm64` for a Raspberry Pi).
 3. Make it executable and move it to a folder of your choosing:
 
 ```bash
-chmod +x meshcore-bot-linux-arm64
-sudo mv meshcore-bot-linux-arm64 /usr/local/bin/meshcore-bot
+chmod +x OwlBot-linux-arm64
+sudo mv OwlBot-linux-arm64 /usr/local/bin/OwlBot
 ```
 
 ### Docker
 
-Images are published to `ghcr.io/meshcore-go/meshcore-bot` for the following platforms:
+Images are published to `ghcr.io/owlshack/owlbot` for the following platforms:
 `linux/386`, `linux/amd64`, `linux/arm/v6`, `linux/arm/v7`, `linux/arm64/v8`, `linux/ppc64le`, `linux/riscv64`, `linux/s390x`.
 
 ```bash
-docker pull ghcr.io/meshcore-go/meshcore-bot:latest
+docker pull ghcr.io/owlshack/owlbot:latest
 ```
 
 ### Build from Source
 
-Requires Go 1.26.1+.
+Requires Go 1.26.7+.
 
 ```bash
-git clone https://github.com/meshcore-go/meshcore-bot.git
-cd meshcore-bot
-go build -o meshcore-bot
+git clone https://github.com/OwlShack/OwlBot.git
+cd OwlBot
+go build -o OwlBot
 ```
 
 ## Running
@@ -90,28 +90,28 @@ match = ["(?i)^ping"]
 ### Step 3: Run it
 
 ```bash
-./meshcore-bot
+./OwlBot
 ```
 
 That's it. The bot will connect to your radio, join the `#testing` channel, and reply "Pong! Hello \<sender\>" whenever someone sends a message starting with "ping".
 
 ### Using Docker
 
-Mount your config file and pass through the serial device:
+Put `config.toml` in a folder, mount the folder at `/data`, and pass through the serial device. The bot also keeps `mqtt_identity.key` there, so the MQTT identity survives a new container:
 
 ```bash
 docker run -d \
   --device /dev/ttyACM0 \
-  -v ./config.toml:/data/config.toml \
-  ghcr.io/meshcore-go/meshcore-bot
+  -v ./data:/data \
+  ghcr.io/owlshack/owlbot
 ```
 
 For TCP connections (e.g. a serial-to-TCP bridge to the KISS device), no `--device` is needed:
 
 ```bash
 docker run -d \
-  -v ./config.toml:/data/config.toml \
-  ghcr.io/meshcore-go/meshcore-bot
+  -v ./data:/data \
+  ghcr.io/owlshack/owlbot
 ```
 
 Pass CLI flags directly:
@@ -120,9 +120,21 @@ Pass CLI flags directly:
 docker run -d \
   --device /dev/ttyACM0 \
   -v ./my-config.toml:/my-config.toml \
-  ghcr.io/meshcore-go/meshcore-bot \
-  meshcore-bot -c /my-config.toml -vvv
+  ghcr.io/owlshack/owlbot \
+  OwlBot -c /my-config.toml -vvv
 ```
+
+### Upgrading from meshcore-bot
+
+OwlBot is meshcore-bot under a new name. Your config file and `mqtt_identity.key` work unchanged: every bot keeps its mesh identity, and the MQTT observer keeps its public key.
+
+- **Binary**: replace the old binary with the `OwlBot-*` one for your platform from the [Releases](https://github.com/OwlShack/OwlBot/releases) page, and change any service file or script that runs `meshcore-bot`. Run it from the same directory as before, where it finds `config.toml` and `mqtt_identity.key`.
+- **Docker**: change the image to `ghcr.io/owlshack/owlbot`. If you pass a command, it is now `OwlBot` instead of `meshcore-bot`. `ghcr.io/meshcore-go/meshcore-bot` stays at v1.2.0 and gets no more updates. If you mounted only `config.toml`, the key is inside the old container; copy it into your data folder before removing that container, or the observer starts with a new identity:
+
+  ```bash
+  docker cp <old-container>:/data/mqtt_identity.key ./data/
+  ```
+- **MQTT consumers**: status messages now report `model` as `OwlBot` and `client_version` as `OwlBot/<version>`.
 
 ## Configuration Reference
 
@@ -314,7 +326,7 @@ template = "Periodic update: The time is {{.Time}}"
 
 ## MQTT Integration
 
-meshcore-bot can publish observed mesh traffic to MQTT brokers. This is used by services like [LetsMesh](https://letsmesh.net) to aggregate mesh network data.
+OwlBot can publish observed mesh traffic to MQTT brokers. This is used by services like [LetsMesh](https://letsmesh.net) to aggregate mesh network data.
 
 MQTT lives under exactly one bot: define an optional `[bot.mqtt]` section on a single `[[bot]]`. At most one bot in the whole config may have it. A unique identity key file is used for authentication.
 
@@ -415,7 +427,7 @@ When enabled, the observer broadcasts a signed chat-node advert over the mesh on
 Send a `SIGHUP` signal to the process to reload the configuration without restarting:
 
 ```bash
-kill -SIGHUP $(pgrep meshcore-bot)
+kill -SIGHUP $(pgrep OwlBot)
 ```
 
 If the connection settings, radio parameters, `spiBoard` or `modemToken` change, the bot reconnects the radio.
