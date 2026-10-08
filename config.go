@@ -89,12 +89,20 @@ type TriggerConfig struct {
 
 	// Cron Trigger
 	Schedule string `json:"schedule,omitempty" yaml:"schedule,omitempty" toml:"schedule,omitempty"`
+
+	// FloodScope is the region this trigger's posts are scoped to; unset or
+	// inherit takes the bot's.
+	FloodScope FloodScope `json:"floodScope,omitempty" yaml:"floodScope,omitempty" toml:"floodScope,omitempty"`
 }
 
 type BotConfig struct {
 	Name *string `json:"name" yaml:"name" toml:"name"` // Name of the Node - Used in Channel Messages
 
 	Triggers []TriggerConfig `json:"triggers" yaml:"triggers" toml:"trigger"`
+
+	// FloodScope is the region the bot's posts are scoped to unless a trigger
+	// says otherwise; unset sends unscoped.
+	FloodScope FloodScope `json:"floodScope,omitempty" yaml:"floodScope,omitempty" toml:"floodScope,omitempty"`
 
 	// MQTT publishing, owned by this bot. At most one bot in the whole app
 	// may define it (validated after load).
@@ -253,6 +261,16 @@ func (c *Config) validate() error {
 	if n > 1 {
 		return fmt.Errorf("at most one bot may define an mqtt section, found %d", n)
 	}
+	for _, b := range c.Bots {
+		if err := b.FloodScope.validate(false); err != nil {
+			return fmt.Errorf("bot %s: %w", botLabel(b), err)
+		}
+		for i, t := range b.Triggers {
+			if err := t.FloodScope.validate(true); err != nil {
+				return fmt.Errorf("bot %s trigger %d: %w", botLabel(b), i+1, err)
+			}
+		}
+	}
 	// Checked here, not at connect, so a bad connection on SIGHUP is a reload
 	// that keeps the running config rather than a modem setup that exits.
 	if c.Connection != nil {
@@ -272,4 +290,11 @@ func (c *Config) validate() error {
 		return fmt.Errorf("dutyCycle is a percentage, must be >0 and <=100, got %v", *c.DutyCycle)
 	}
 	return nil
+}
+
+func botLabel(b BotConfig) string {
+	if b.Name == nil {
+		return "(unnamed)"
+	}
+	return fmt.Sprintf("%q", *b.Name)
 }

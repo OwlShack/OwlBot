@@ -241,6 +241,7 @@ Fires when a message is received on a channel that matches one of the `match` pa
 | `maxRetries` | Total sends, counting the first: `3` sends once and resends up to twice | `3` |
 | `charLimitBehaviour` | What to do when a message exceeds the character limit: `"truncate"` or `"split"` | — |
 | `pathHashSize` | Path hash size: `0` = copy sender's setting, `1`/`2`/`3` = bytes per hash | `1` |
+| `floodScope` | Region the post is scoped to: `region:<name>`, `everywhere`, or `inherit` (the bot's). See [Flood scope](#flood-scope) | the bot's |
 
 #### Cron Trigger (`type = "cron"`)
 
@@ -255,8 +256,34 @@ Fires on a schedule.
 | `maxRetries` | Total sends, counting the first: `3` sends once and resends up to twice | `3` |
 | `charLimitBehaviour` | What to do when a message exceeds the character limit: `"truncate"` or `"split"` | — |
 | `pathHashSize` | Path hash size: `0` = copy sender's setting, `1`/`2`/`3` = bytes per hash | `1` |
+| `floodScope` | Region the post is scoped to: `region:<name>`, `everywhere`, or `inherit` (the bot's). See [Flood scope](#flood-scope) | the bot's |
 
 After sending a message, the bot listens for the message to be repeated back by a repeater. If no echo is heard within `retryTimeout` seconds, the message is sent again, until it has been sent `maxRetries` times in all. This applies to both channel and cron triggers.
+
+#### Flood scope
+
+A MeshCore region scopes a post so that only repeaters which allow that region pass it on. Set `floodScope` on a bot to scope all its posts, and on a trigger to change it for that trigger alone:
+
+```toml
+[[bot]]
+name = "Ping Bot"
+floodScope = "region:nz"     # every post from this bot is scoped to #nz
+
+[[bot.trigger]]
+type = "cron"
+schedule = "0 9 * * *"
+channels = ["#general"]
+template = "Morning!"
+floodScope = "everywhere"    # this one goes out unscoped
+```
+
+| Value | Meaning |
+|-------|---------|
+| `region:<name>` | Scoped to that region. Give the bare name: `region:nz` is the region repeaters list as `#nz` |
+| `everywhere` | Unscoped, the default when nothing is set |
+| `inherit` | Use the bot's setting (triggers only) |
+
+Private `$` regions are not supported, because a private region's key cannot be derived from its name. A value the bot does not accept stops it loading, and a `SIGHUP` reload with one keeps the running config. The same values work in OwlShack.
 
 ### Template Variables
 

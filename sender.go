@@ -21,15 +21,16 @@ func NewNodeSender(n *node.Node) *NodeSender {
 	}
 }
 
-func (s *NodeSender) SendGroupText(_ context.Context, channel *meshcore.ChannelEntry, senderName string, text string, pathHashSize uint8, retryTimeout time.Duration, maxRetries int) error {
+func (s *NodeSender) SendGroupText(_ context.Context, channel *meshcore.ChannelEntry, scope *meshcore.Region, senderName string, text string, pathHashSize uint8, retryTimeout time.Duration, maxRetries int) error {
 	reply := &meshcore.GroupTextPayload{
 		Timestamp: uint32(time.Now().Unix()),
 		Sender:    senderName,
 		Text:      text,
 	}
 
-	return s.node.SendGroupText(
+	return s.node.SendGroupTextScoped(
 		channel,
+		scope,
 		reply,
 		pathHashSize,
 		retryTimeout,
