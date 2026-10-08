@@ -30,6 +30,8 @@ built on meshcore-go v1.7.0.
 - **Templates can print dates and times.** `{{date now "15:04"}}` gives the current time, and
   `{{date .Timestamp "15:04"}}` when a channel message was sent. An optional zone such as
   `"Pacific/Auckland"` sets the time zone, and works the same on every platform.
+- **Posts can be scoped to a MeshCore region.** `floodScope = "region:nz"` on a bot or a trigger
+  sends its posts so only repeaters that allow `#nz` pass them on. Unset stays unscoped, as before.
 - **Choose how path hashes are joined.** `{{formatPathBytes .PathHashes " > "}}` gives
   `A1 > B2 > C3` instead of the default `A1, B2, C3`.
 
