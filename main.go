@@ -14,9 +14,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/meshcore-go/meshcore-go/hardware"
-	kissTransport "github.com/meshcore-go/meshcore-go/hardware/transport"
-	"github.com/meshcore-go/meshcore-go/node"
+	"github.com/OwlShack/meshcore-go/hardware"
+	kissTransport "github.com/OwlShack/meshcore-go/hardware/transport"
+	"github.com/OwlShack/meshcore-go/node"
 	flag "github.com/spf13/pflag"
 )
 
@@ -104,7 +104,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println("meshcore-bot", version)
+		fmt.Println("OwlBot", version)
 		return
 	}
 

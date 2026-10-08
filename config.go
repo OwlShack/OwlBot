@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/meshcore-go/meshcore-go/node"
+	"github.com/OwlShack/meshcore-go/node"
 	"github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
 )

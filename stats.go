@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/meshcore-go/meshcore-go/hardware"
+	"github.com/OwlShack/meshcore-go/hardware"
 )
 
 type RadioInfo struct {
@@ -26,7 +26,7 @@ type RadioInfo struct {
 // ponytail: one estimator for every transport, because all three compute the
 // same number here. sx12xx.Modem.AirtimeEstimator IS this estimator, and
 // openhop's only departs from it when its preamble differs from MeshCore's,
-// which setupOpenhop pins to sx12xx.PreambleForSF. Make the openHop preamble
+// which setupOpenhop pins to hardware.PreambleForSF. Make the openHop preamble
 // configurable and this needs routing through the driver's estimator instead.
 func (r RadioInfo) airtimeMs(packetLen int) uint32 {
 	if r.FreqHz == 0 {
@@ -128,9 +128,7 @@ type kissStatsProvider struct {
 	lastReply atomic.Int64
 
 	// pollMu serialises Stats. The liveness probe and the MQTT status both
-	// poll, and two polls at once reopen the ordering trap documented in
-	// Stats: one poll's battery error would land on the other's counters
-	// request. One poll at a time keeps the proven order.
+	// poll; one poll at a time keeps them from doubling the queries.
 	pollMu sync.Mutex
 
 	mu          sync.Mutex
@@ -207,18 +205,10 @@ func (p *kissStatsProvider) Stats(ctx context.Context) DeviceStats {
 	p.pollMu.Lock()
 	defer p.pollMu.Unlock()
 
-	// Polled BEFORE the fire-and-forget queries below, and this ordering is
-	// load-bearing. FirmwareCounters is synchronous: it registers a waiter that
-	// completeHwRequest hands ANY non-TX_BUSY HW_RESP_ERROR to, whatever asked
-	// for it. HW_ERR_NO_CALLBACK is the routine answer to GetBattery on a board
-	// with no cell, so polling after them would fail this read on exactly the
-	// boards that report least.
-	//
-	// Verified on hardware, not just read off the library: with an error frame
-	// in flight the counters request failed 6 of 6 times with the OTHER
-	// query's error, and 3 of 3 clean in this order. (Provoked with an
-	// unregistered command, because this board answers battery and MCU temp
-	// successfully and so never emits HW_ERR_NO_CALLBACK itself.)
+	// The order no longer matters. Before meshcore-go v1.7.0 an error reply to
+	// GetBattery (HW_ERR_NO_CALLBACK on a board with no cell) could fail this
+	// request; v1.7.0 matches each reply to its command by position, the
+	// fire-and-forget queries included.
 	//
 	// Only PacketsErrors is taken. FirmwareStats also carries PacketsRecv and
 	// PacketsSent, but packets_recv on the wire is the observer's own tally and

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	meshcore "github.com/meshcore-go/meshcore-go"
-	"github.com/meshcore-go/meshcore-go/hardware"
-	"github.com/meshcore-go/meshcore-go/node"
+	meshcore "github.com/OwlShack/meshcore-go"
+	"github.com/OwlShack/meshcore-go/hardware"
+	"github.com/OwlShack/meshcore-go/node"
 )
 
 // rxTimeLayout is an RFC3339-style timestamp with microsecond precision; the
@@ -276,10 +276,10 @@ func formatStatus(status, originName, originID string, radio RadioInfo, ds Devic
 		Timestamp:       time.Now().UTC().Format(rxTimeLayout),
 		Origin:          originName,
 		OriginID:        originID,
-		Model:           "meshcore-bot",
+		Model:           "OwlBot",
 		FirmwareVersion: version,
 		Radio:           radioStr,
-		ClientVersion:   "meshcore-bot/" + version,
+		ClientVersion:   "OwlBot/" + version,
 		Stats: statsBlock{
 			BatteryMV:  batteryMV,
 			UptimeSecs: ds.UptimeSecs,

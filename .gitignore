@@ -45,6 +45,6 @@ go.work.sum
 docker/bin/
 
 # Binary Builds
-meshcore-bot
+OwlBot
 
 scratchpad/

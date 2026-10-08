@@ -9,7 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/meshcore-go/meshcore-go/hardware/sx12xx"
+	"github.com/OwlShack/meshcore-go/hardware"
+	"github.com/OwlShack/meshcore-go/hardware/sx12xx"
 	"periph.io/x/conn/v3/gpio/gpioreg"
 	"periph.io/x/conn/v3/spi/spireg"
 	"periph.io/x/host/v3"
@@ -115,7 +116,7 @@ func setupSPI(ms *modemState, cfg *Config, connAddr string, radio RadioInfo) err
 	slog.Info("radio up", "component", "modem", "transport", "spi",
 		"board", board.Name, "chip", board.Chip, "spi", portName,
 		"freq", *cfg.Freq, "bw", *cfg.Bw, "sf", *cfg.SF, "cr", *cfg.CR, "tx", radio.TxPower,
-		"preamble_symbols", sx12xx.PreambleForSF(radio.SF))
+		"preamble_symbols", hardware.PreambleForSF(radio.SF))
 
 	ms.stats = stats
 	ms.modem = m
@@ -173,7 +174,9 @@ func (p *sx12xxStatsProvider) RadioConfig() RadioInfo { return p.radio }
 func (p *sx12xxStatsProvider) Stats(context.Context) DeviceStats {
 	ds := DeviceStats{UptimeSecs: uint32(time.Since(p.startTime).Seconds())}
 	if m := p.modem.Load(); m != nil {
-		ds.NoiseFloor = int16(m.NoiseFloor())
+		if nf, ok := m.NoiseFloor(); ok {
+			ds.NoiseFloor = int16(nf)
+		}
 	}
 	return ds
 }

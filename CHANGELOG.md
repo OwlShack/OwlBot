@@ -3,6 +3,29 @@
 Notable changes per release. Dates are the tag date; unreleased work sits at the
 top until tagged.
 
+## Unreleased
+
+Baseline `v1.2.0`. meshcore-bot is now OwlBot, and lives at
+[OwlShack/OwlBot](https://github.com/OwlShack/OwlBot). Config and stored identities are unchanged.
+
+### Changed
+
+- **meshcore-bot is renamed OwlBot.** The binary, release downloads and Docker image carry the
+  new name. Your config file and `mqtt_identity.key` carry over as they are, so every bot keeps
+  its mesh identity and the MQTT observer keeps its public key.
+- **MQTT status reports `model` as `OwlBot`.** `client_version` is now `OwlBot/<version>`.
+- **Built on meshcore-go v1.7.0.** The bot's own messages go out at firmware transmit priorities
+  rather than queuing behind relayed traffic, and it ignores packets firmware discards, such as
+  encrypted payloads that are not whole AES blocks.
+
+### Upgrading
+
+- **Docker: switch the image to `ghcr.io/owlshack/owlbot`.** `ghcr.io/meshcore-go/meshcore-bot`
+  stays at v1.2.0. If you mounted only `config.toml`, copy `mqtt_identity.key` out of the old
+  container first, or the observer starts with a new identity. The README has the command.
+- **Binary: replace it with an `OwlBot-*` download** and change any service file or script that
+  runs `meshcore-bot`. Run it from the same directory as before.
+
 ## v1.2.0 - 2026-09-30
 
 Baseline `v1.0.6`. openHop Modems and SPI radio hats join KISS firmware, the MQTT status now uses

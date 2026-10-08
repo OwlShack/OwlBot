@@ -66,8 +66,11 @@ func (ms *modemState) watch(died chan<- *modemState) {
 	}
 
 	if lr, ok := ms.stats.(interface{ LastReply() time.Time }); ok {
+		// Read here, not in the goroutine, so a test restoring it cannot race a
+		// probe that has not started yet.
+		interval := probeInterval
 		go func() {
-			if ms.probe(lr) {
+			if ms.probe(lr, interval) {
 				report()
 			}
 		}()
@@ -76,8 +79,8 @@ func (ms *modemState) watch(died chan<- *modemState) {
 
 // probe returns true once the modem has missed probeMisses status queries in a
 // row, or false when ms is closed.
-func (ms *modemState) probe(lr interface{ LastReply() time.Time }) bool {
-	tick := time.NewTicker(probeInterval)
+func (ms *modemState) probe(lr interface{ LastReply() time.Time }, interval time.Duration) bool {
+	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	misses := 0
 	for {
