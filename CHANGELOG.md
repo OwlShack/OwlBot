@@ -43,6 +43,13 @@ built on meshcore-go v1.7.0.
   rather than queuing behind relayed traffic, and it ignores packets firmware discards, such as
   encrypted payloads that are not whole AES blocks.
 
+### Fixed
+
+- **Packets dropped while a broker is down are now logged.** They are still not buffered, but a
+  warning says when a broker starts dropping them, and the count is logged when it reconnects.
+  Before, they went missing without a word, including any heard in the moment before the first
+  connection.
+
 ### Upgrading
 
 - **Docker: switch the image to `ghcr.io/owlshack/owlbot`.** `ghcr.io/meshcore-go/meshcore-bot`

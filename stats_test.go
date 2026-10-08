@@ -810,3 +810,52 @@ func TestRefreshFailureDropsStaleClientSoRetryDials(t *testing.T) {
 	close(bc.stop)
 	waitLoopsDone(t, bc)
 }
+
+// fakeLinkClient is connected, reconnecting or down on demand.
+type fakeLinkClient struct {
+	mqtt.Client
+	up           bool
+	reconnecting bool // paho with AutoReconnect: IsConnected true, connection not open
+}
+
+func (f *fakeLinkClient) IsConnected() bool      { return f.up || f.reconnecting }
+func (f *fakeLinkClient) IsConnectionOpen() bool { return f.up }
+func (f *fakeLinkClient) Publish(string, byte, bool, any) mqtt.Token {
+	return &mqtt.DummyToken{}
+}
+
+// Packets heard while a broker is down are dropped, not buffered. That must be
+// visible: one warning when the dropping starts, and the count once publishing
+// resumes, not a line per packet.
+func TestDoPublishLogsDropsWhileBrokerDown(t *testing.T) {
+	var logs strings.Builder
+	o := &MqttObserver{log: slog.New(slog.NewTextHandler(&logs, nil))}
+	fc := &fakeLinkClient{}
+	bc := &brokerClient{cfg: BrokerConfig{Name: "b"}}
+	bc.swapClient(fc)
+
+	for range 3 {
+		o.doPublish(bc, publishJob{topic: "t"})
+	}
+	if n := strings.Count(logs.String(), "dropping packets"); n != 1 {
+		t.Fatalf("%d drop warnings for one outage, want 1:\n%s", n, logs.String())
+	}
+
+	fc.up = true
+	o.doPublish(bc, publishJob{topic: "t"})
+	o.doPublish(bc, publishJob{topic: "t"})
+	if !strings.Contains(logs.String(), "broker publishing again") || !strings.Contains(logs.String(), "dropped=3") {
+		t.Fatalf("recovery should report the 3 dropped packets once:\n%s", logs.String())
+	}
+	if n := strings.Count(logs.String(), "publishing again"); n != 1 {
+		t.Errorf("%d recovery lines, want 1", n)
+	}
+
+	// An outage mid-run looks like this to paho: still "connected" while it
+	// reconnects, and a QoS 0 publish then vanishes. It must warn again.
+	fc.up, fc.reconnecting = false, true
+	o.doPublish(bc, publishJob{topic: "t"})
+	if n := strings.Count(logs.String(), "dropping packets"); n != 2 {
+		t.Errorf("%d drop warnings after a mid-run outage, want 2", n)
+	}
+}
