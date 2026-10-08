@@ -5,8 +5,25 @@ top until tagged.
 
 ## Unreleased
 
-Baseline `v1.2.0`. meshcore-bot is now OwlBot, and lives at
-[OwlShack/OwlBot](https://github.com/OwlShack/OwlBot). Config and stored identities are unchanged.
+> [!WARNING]
+> **meshcore-bot is now OwlBot. Updating needs a manual step, or you stay on v1.2.0.**
+>
+> - **Docker:** `ghcr.io/meshcore-go/meshcore-bot` gets no more updates. Pulling it keeps you on
+>   v1.2.0 with no error. Switch to `ghcr.io/owlshack/owlbot`.
+> - **Downloads:** release files are now `OwlBot-<os>-<arch>`. A script that fetches the latest
+>   `meshcore-bot-*` file gets a 404.
+> - **The program is `OwlBot`.** Update service files, scripts and `pgrep` lines that name
+>   `meshcore-bot`, and a Docker command that runs it by name.
+> - **MQTT:** `model` and `client_version` now say `OwlBot`. Update any dashboard or filter that
+>   matches on `meshcore-bot`.
+> - **The repository moved to [OwlShack/OwlBot](https://github.com/OwlShack/OwlBot).** Old links
+>   redirect.
+>
+> Your config file, `mqtt_identity.key`, bot identities and MQTT topics carry over unchanged. See
+> Upgrading below.
+
+Baseline `v1.2.0`. The bot is renamed OwlBot, templates can print dates and times, and it is
+built on meshcore-go v1.7.0.
 
 ### Added
 
