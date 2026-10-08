@@ -110,3 +110,49 @@ func TestEmbeddedTZDataIsLinked(t *testing.T) {
 	}
 	t.Error("time/tzdata is not linked in; named zones would fail wherever the host has no zoneinfo")
 }
+
+func TestFormatPathBytes_Separator(t *testing.T) {
+	data := map[string]any{"PathHashes": [][]byte{{0xa1}, {0xb2}, {0xc3}}}
+	cases := []struct{ tmpl, want string }{
+		{`{{formatPathBytes .PathHashes}}`, "A1, B2, C3"},
+		{`{{.PathHashes | formatPathBytes}}`, "A1, B2, C3"}, // the form config.toml.example uses
+		{`{{formatPathBytes .PathHashes " > "}}`, "A1 > B2 > C3"},
+		{`{{formatPathBytes .PathHashes ""}}`, "A1B2C3"},
+		{`{{formatPathBytes .PathHashes "\n"}}`, "A1\nB2\nC3"},
+	}
+	for _, c := range cases {
+		got, err := render(t, c.tmpl, data)
+		if err != nil {
+			t.Errorf("%s: %v", c.tmpl, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("%s = %q, want %q", c.tmpl, got, c.want)
+		}
+	}
+}
+
+// An empty path is "Direct" whatever the separator: there is nothing to join.
+func TestFormatPathBytes_DirectIgnoresSeparator(t *testing.T) {
+	data := map[string]any{"PathHashes": [][]byte{}}
+	for _, tmpl := range []string{
+		`{{formatPathBytes .PathHashes}}`,
+		`{{formatPathBytes .PathHashes " > "}}`,
+	} {
+		got, err := render(t, tmpl, data)
+		if err != nil {
+			t.Errorf("%s: %v", tmpl, err)
+			continue
+		}
+		if got != "Direct" {
+			t.Errorf("%s = %q, want %q", tmpl, got, "Direct")
+		}
+	}
+}
+
+func TestFormatPathBytes_RejectsExtraArgs(t *testing.T) {
+	data := map[string]any{"PathHashes": [][]byte{{0xa1}}}
+	if _, err := render(t, `{{formatPathBytes .PathHashes ">" "<"}}`, data); err == nil {
+		t.Fatal("a second separator must error, matching date's one-zone rule, not be silently dropped")
+	}
+}
