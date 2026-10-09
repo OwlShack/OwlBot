@@ -3,6 +3,69 @@
 Notable changes per release. Dates are the tag date; unreleased work sits at the
 top until tagged.
 
+## v1.3.0 - 2026-10-09
+
+> [!WARNING]
+> **meshcore-bot is now OwlBot. Updating needs a manual step, or you stay on v1.2.0.**
+>
+> - **Docker:** `ghcr.io/meshcore-go/meshcore-bot` gets no more updates. Pulling it keeps you on
+>   v1.2.0 with no error. Switch to `ghcr.io/owlshack/owlbot`.
+> - **Downloads:** release files are now `OwlBot-<os>-<arch>`. A script that fetches the latest
+>   `meshcore-bot-*` file gets a 404.
+> - **The program is `OwlBot`.** Update service files, scripts and `pgrep` lines that name
+>   `meshcore-bot`, and a Docker command that runs it by name.
+> - **MQTT:** `model` and `client_version` now say `OwlBot`. Update any dashboard or filter that
+>   matches on `meshcore-bot`.
+> - **The repository moved to [OwlShack/OwlBot](https://github.com/OwlShack/OwlBot).** Old links
+>   redirect.
+>
+> Your config file, `mqtt_identity.key`, bot identities and MQTT topics carry over unchanged. See
+> Upgrading below.
+
+Baseline `v1.2.0`. The bot is renamed OwlBot, templates can print dates and times, and it is
+built on meshcore-go v1.7.0.
+
+### Added
+
+- **Templates can print dates and times.** `{{date now "15:04"}}` gives the current time, and
+  `{{date .Timestamp "15:04"}}` when a channel message was sent. An optional zone such as
+  `"Pacific/Auckland"` sets the time zone, and works the same on every platform.
+- **Posts can be scoped to a MeshCore region.** `floodScope = "region:nz"` on a bot or a trigger
+  sends its posts so only repeaters that allow `#nz` pass them on. Unset stays unscoped, as before.
+- **Each MQTT broker can set its own topics.** `packetTopic` and `statusTopic` take `{iata}`,
+  `{pubkey}` and `{name}`, for brokers that expect a different layout. Unset keeps the current
+  topics.
+- **Choose how path hashes are joined.** `{{formatPathBytes .PathHashes " > "}}` gives
+  `A1 > B2 > C3` instead of the default `A1, B2, C3`.
+
+### Changed
+
+- **meshcore-bot is renamed OwlBot.** The binary, release downloads and Docker image carry the
+  new name. Your config file and `mqtt_identity.key` carry over as they are, so every bot keeps
+  its mesh identity and the MQTT observer keeps its public key.
+- **MQTT status reports `model` as `OwlBot`.** `client_version` is now `OwlBot/<version>`.
+- **Built on meshcore-go v1.7.0.** The bot's own messages go out at firmware transmit priorities
+  rather than queuing behind relayed traffic, and it ignores packets firmware discards, such as
+  encrypted payloads that are not whole AES blocks.
+
+### Fixed
+
+- **The MQTT status says online again as soon as a broker reconnects.** When the link drops, the
+  broker publishes the bot as offline. It used to stay that way until the next status, up to 5
+  minutes later, even though the bot was back.
+- **Packets dropped while a broker is down are now logged.** They are still not buffered, but a
+  warning says when a broker starts dropping them, and the count is logged when it reconnects.
+  Before, they went missing without a word, including any heard in the moment before the first
+  connection.
+
+### Upgrading
+
+- **Docker: switch the image to `ghcr.io/owlshack/owlbot`.** `ghcr.io/meshcore-go/meshcore-bot`
+  stays at v1.2.0. If you mounted only `config.toml`, copy `mqtt_identity.key` out of the old
+  container first, or the observer starts with a new identity. The README has the command.
+- **Binary: replace it with an `OwlBot-*` download** and change any service file or script that
+  runs `meshcore-bot`. Run it from the same directory as before.
+
 ## v1.2.0 - 2026-09-30
 
 Baseline `v1.0.6`. openHop Modems and SPI radio hats join KISS firmware, the MQTT status now uses

@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	meshcore "github.com/meshcore-go/meshcore-go"
+	meshcore "github.com/OwlShack/meshcore-go"
 )
 
 func loadOrCreateIdentity(path string) (meshcore.LocalIdentity, error) {
@@ -47,7 +47,10 @@ func identityFromFile(data []byte) (meshcore.LocalIdentity, error) {
 // writeIdentity persists the seed atomically (temp file + rename) so a crash
 // mid-write can't corrupt the key and silently rotate the identity.
 func writeIdentity(path string, id meshcore.LocalIdentity) error {
-	seed := id.Seed()
+	seed, ok := id.Seed()
+	if !ok {
+		return fmt.Errorf("identity has no seed to save")
+	}
 	content := hex.EncodeToString(seed[:]) + "\n"
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(content), 0o600); err != nil {

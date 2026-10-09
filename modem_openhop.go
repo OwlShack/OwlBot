@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/meshcore-go/meshcore-go/hardware/openhop"
-	"github.com/meshcore-go/meshcore-go/hardware/sx12xx"
+	"github.com/OwlShack/meshcore-go/hardware"
+	"github.com/OwlShack/meshcore-go/hardware/openhop"
 )
 
 // openhopSyncWord is MeshCore's private sync word: the firmware's own default,
@@ -55,7 +55,7 @@ func setupOpenhop(ctx context.Context, ms *modemState, cfg *Config, connAddr str
 		CR:          radio.CR,
 		TxPower:     int8(radio.TxPower),
 		SyncWord:    openhopSyncWord,
-		PreambleLen: uint8(sx12xx.PreambleForSF(radio.SF)),
+		PreambleLen: uint8(hardware.PreambleForSF(radio.SF)),
 	}
 
 	m := openhop.New(dial,
@@ -89,7 +89,7 @@ func setupOpenhop(ctx context.Context, ms *modemState, cfg *Config, connAddr str
 
 // openhopStatsProvider reads the firmware's own counters. One STATUS command
 // answers with every reading at once, so unlike KISS there is nothing to fan
-// out and no ordering to get wrong.
+// out.
 type openhopStatsProvider struct {
 	modem     *openhop.Modem
 	radio     RadioInfo

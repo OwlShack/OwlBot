@@ -1,12 +1,12 @@
-# meshcore-bot
+# OwlBot
 
-A configurable bot framework for [MeshCore](https://github.com/meshcore-dev/MeshCore) mesh networks, built with the pure Go [meshcore-go](https://github.com/meshcore-go/meshcore-go) library.
+A configurable bot framework for [MeshCore](https://github.com/meshcore-dev/MeshCore) mesh networks, built with the pure Go [meshcore-go](https://github.com/OwlShack/meshcore-go) library. Formerly meshcore-bot: see [Upgrading from meshcore-bot](#upgrading-from-meshcore-bot).
 
 ## Features
 
 - **Trigger-based architecture**: Respond to group messages, private channel messages, or on a cron schedule.
 - **Go template responses**: Access mesh data like sender, hops, path hashes, SNR, RSSI, and more.
-- **Three kinds of radio**: MeshCore KISS firmware over USB or TCP, [openHop Modem](https://github.com/openhop-dev) firmware over USB or TCP, or a bare SX1262 hat on a Raspberry Pi's SPI bus. The same modems [OwlShack](https://github.com/meshcore-go/OwlShack) supports, publishing the same MQTT schema.
+- **Three kinds of radio**: MeshCore KISS firmware over USB or TCP, [openHop Modem](https://github.com/openhop-dev) firmware over USB or TCP, or a bare SX1262 hat on a Raspberry Pi's SPI bus. The same modems [OwlShack](https://github.com/OwlShack/OwlShack) supports, publishing the same MQTT schema.
 - **Private channel support**: Join private channels using a hex-encoded PSK.
 - **MQTT integration**: Publish observed mesh traffic to MQTT brokers (e.g. [LetsMesh](https://letsmesh.net), [CoreScope](https://github.com/Kpa-clawbot/CoreScope)).
 - **Hot-reload**: Reload configuration via `SIGHUP` without restarting. Reconnects the modem if connection settings change.
@@ -18,34 +18,34 @@ A configurable bot framework for [MeshCore](https://github.com/meshcore-dev/Mesh
 
 ### Download a Release Binary (Recommended)
 
-Pre-built binaries are available for Linux, macOS, and Windows on the [Releases](https://github.com/meshcore-go/meshcore-bot/releases) page.
+Pre-built binaries are available for Linux, macOS, and Windows on the [Releases](https://github.com/OwlShack/OwlBot/releases) page.
 
-1. Go to the [latest release](https://github.com/meshcore-go/meshcore-bot/releases/latest).
-2. Download the binary for your platform (e.g. `meshcore-bot-linux-arm64` for a Raspberry Pi).
+1. Go to the [latest release](https://github.com/OwlShack/OwlBot/releases/latest).
+2. Download the binary for your platform (e.g. `OwlBot-linux-arm64` for a Raspberry Pi).
 3. Make it executable and move it to a folder of your choosing:
 
 ```bash
-chmod +x meshcore-bot-linux-arm64
-sudo mv meshcore-bot-linux-arm64 /usr/local/bin/meshcore-bot
+chmod +x OwlBot-linux-arm64
+sudo mv OwlBot-linux-arm64 /usr/local/bin/OwlBot
 ```
 
 ### Docker
 
-Images are published to `ghcr.io/meshcore-go/meshcore-bot` for the following platforms:
+Images are published to `ghcr.io/owlshack/owlbot` for the following platforms:
 `linux/386`, `linux/amd64`, `linux/arm/v6`, `linux/arm/v7`, `linux/arm64/v8`, `linux/ppc64le`, `linux/riscv64`, `linux/s390x`.
 
 ```bash
-docker pull ghcr.io/meshcore-go/meshcore-bot:latest
+docker pull ghcr.io/owlshack/owlbot:latest
 ```
 
 ### Build from Source
 
-Requires Go 1.26.1+.
+Requires Go 1.26.7+.
 
 ```bash
-git clone https://github.com/meshcore-go/meshcore-bot.git
-cd meshcore-bot
-go build -o meshcore-bot
+git clone https://github.com/OwlShack/OwlBot.git
+cd OwlBot
+go build -o OwlBot
 ```
 
 ## Running
@@ -90,28 +90,28 @@ match = ["(?i)^ping"]
 ### Step 3: Run it
 
 ```bash
-./meshcore-bot
+./OwlBot
 ```
 
 That's it. The bot will connect to your radio, join the `#testing` channel, and reply "Pong! Hello \<sender\>" whenever someone sends a message starting with "ping".
 
 ### Using Docker
 
-Mount your config file and pass through the serial device:
+Put `config.toml` in a folder, mount the folder at `/data`, and pass through the serial device. The bot also keeps `mqtt_identity.key` there, so the MQTT identity survives a new container:
 
 ```bash
 docker run -d \
   --device /dev/ttyACM0 \
-  -v ./config.toml:/data/config.toml \
-  ghcr.io/meshcore-go/meshcore-bot
+  -v ./data:/data \
+  ghcr.io/owlshack/owlbot
 ```
 
 For TCP connections (e.g. a serial-to-TCP bridge to the KISS device), no `--device` is needed:
 
 ```bash
 docker run -d \
-  -v ./config.toml:/data/config.toml \
-  ghcr.io/meshcore-go/meshcore-bot
+  -v ./data:/data \
+  ghcr.io/owlshack/owlbot
 ```
 
 Pass CLI flags directly:
@@ -120,9 +120,21 @@ Pass CLI flags directly:
 docker run -d \
   --device /dev/ttyACM0 \
   -v ./my-config.toml:/my-config.toml \
-  ghcr.io/meshcore-go/meshcore-bot \
-  meshcore-bot -c /my-config.toml -vvv
+  ghcr.io/owlshack/owlbot \
+  OwlBot -c /my-config.toml -vvv
 ```
+
+### Upgrading from meshcore-bot
+
+OwlBot is meshcore-bot under a new name. Your config file and `mqtt_identity.key` work unchanged: every bot keeps its mesh identity, and the MQTT observer keeps its public key.
+
+- **Binary**: replace the old binary with the `OwlBot-*` one for your platform from the [Releases](https://github.com/OwlShack/OwlBot/releases) page, and change any service file or script that runs `meshcore-bot`. Run it from the same directory as before, where it finds `config.toml` and `mqtt_identity.key`.
+- **Docker**: change the image to `ghcr.io/owlshack/owlbot`. If you pass a command, it is now `OwlBot` instead of `meshcore-bot`. `ghcr.io/meshcore-go/meshcore-bot` stays at v1.2.0 and gets no more updates. If you mounted only `config.toml`, the key is inside the old container; copy it into your data folder before removing that container, or the observer starts with a new identity:
+
+  ```bash
+  docker cp <old-container>:/data/mqtt_identity.key ./data/
+  ```
+- **MQTT consumers**: status messages now report `model` as `OwlBot` and `client_version` as `OwlBot/<version>`.
 
 ## Configuration Reference
 
@@ -229,6 +241,7 @@ Fires when a message is received on a channel that matches one of the `match` pa
 | `maxRetries` | Total sends, counting the first: `3` sends once and resends up to twice | `3` |
 | `charLimitBehaviour` | What to do when a message exceeds the character limit: `"truncate"` or `"split"` | — |
 | `pathHashSize` | Path hash size: `0` = copy sender's setting, `1`/`2`/`3` = bytes per hash | `1` |
+| `floodScope` | Region the post is scoped to: `region:<name>`, `everywhere`, or `inherit` (the bot's). See [Flood scope](#flood-scope) | the bot's |
 
 #### Cron Trigger (`type = "cron"`)
 
@@ -243,8 +256,34 @@ Fires on a schedule.
 | `maxRetries` | Total sends, counting the first: `3` sends once and resends up to twice | `3` |
 | `charLimitBehaviour` | What to do when a message exceeds the character limit: `"truncate"` or `"split"` | — |
 | `pathHashSize` | Path hash size: `0` = copy sender's setting, `1`/`2`/`3` = bytes per hash | `1` |
+| `floodScope` | Region the post is scoped to: `region:<name>`, `everywhere`, or `inherit` (the bot's). See [Flood scope](#flood-scope) | the bot's |
 
 After sending a message, the bot listens for the message to be repeated back by a repeater. If no echo is heard within `retryTimeout` seconds, the message is sent again, until it has been sent `maxRetries` times in all. This applies to both channel and cron triggers.
+
+#### Flood scope
+
+A MeshCore region scopes a post so that only repeaters which allow that region pass it on. Set `floodScope` on a bot to scope all its posts, and on a trigger to change it for that trigger alone:
+
+```toml
+[[bot]]
+name = "Ping Bot"
+floodScope = "region:nz"     # every post from this bot is scoped to #nz
+
+[[bot.trigger]]
+type = "cron"
+schedule = "0 9 * * *"
+channels = ["#general"]
+template = "Morning!"
+floodScope = "everywhere"    # this one goes out unscoped
+```
+
+| Value | Meaning |
+|-------|---------|
+| `region:<name>` | Scoped to that region. Give the bare name: `region:nz` is the region repeaters list as `#nz` |
+| `everywhere` | Unscoped, the default when nothing is set |
+| `inherit` | Use the bot's setting (triggers only) |
+
+Private `$` regions are not supported, because a private region's key cannot be derived from its name. A value the bot does not accept stops it loading, and a `SIGHUP` reload with one keeps the running config. The same values work in OwlShack.
 
 ### Template Variables
 
@@ -265,7 +304,44 @@ After sending a message, the bot listens for the message to be repeated back by 
 - `{{.Schedule}}` — The cron schedule string
 
 **Built-in Functions:**
-- `formatPathBytes` — Formats raw path hashes into a readable string.
+- `formatPathBytes`: formats raw path hashes into a readable string, joined by an optional separator (`Direct` when there is no path).
+- `now`: the current time, as a value you can format or take parts of.
+- `date`: formats a time in a layout, optionally in a named zone.
+
+`formatPathBytes` takes the path hashes and an optional separator, defaulting
+to `", "`:
+
+```
+{{formatPathBytes .PathHashes}}          A1, B2, C3
+{{formatPathBytes .PathHashes " > "}}    A1 > B2 > C3
+{{formatPathBytes .PathHashes ""}}       A1B2C3
+```
+
+A node heard direct renders as `Direct` whatever the separator, since there is
+nothing to join. The pipe form `{{.PathHashes | formatPathBytes}}` still works
+but cannot take a separator, because a pipe passes its value as the last argument.
+
+`date` takes a time, a layout, and an optional [IANA zone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones);
+without a zone it uses the host's. Layouts are Go's, where the layout is itself
+an example date: `2006-01-02 15:04:05`, `Mon`, `Jan`, `3:04PM`.
+
+```
+{{date now "15:04"}}                                  18:30
+{{date now "Mon 2 Jan, 3:04PM" "Pacific/Auckland"}}   Wed 9 Sep, 6:30PM
+{{date now "15:04" "UTC"}}                            06:30
+{{date .Timestamp "15:04" "UTC"}}                     when the message was sent
+{{date .Time "15:04"}}                                when a cron trigger fired
+{{now.Year}}                                          2026
+```
+
+A channel trigger's `{{.Timestamp}}` arrives as raw unix seconds, so printing it
+directly gives a bare number; pass it through `date` to render it. It is the
+sender's clock, which can be wrong. The zone database is compiled into the
+binary, so a named zone resolves the same on every platform.
+
+Leaving the zone off uses whatever the process treats as local, which in a
+container is UTC unless `TZ` is set. Name the zone in the template when it has
+to be right regardless of where the bot runs.
 
 ## Example Configs
 
@@ -314,7 +390,7 @@ template = "Periodic update: The time is {{.Time}}"
 
 ## MQTT Integration
 
-meshcore-bot can publish observed mesh traffic to MQTT brokers. This is used by services like [LetsMesh](https://letsmesh.net) to aggregate mesh network data.
+OwlBot can publish observed mesh traffic to MQTT brokers. This is used by services like [LetsMesh](https://letsmesh.net) to aggregate mesh network data.
 
 MQTT lives under exactly one bot: define an optional `[bot.mqtt]` section on a single `[[bot]]`. At most one bot in the whole config may have it. A unique identity key file is used for authentication.
 
@@ -391,7 +467,8 @@ audience = "meshcore-mqtt-1.baird.io"
 | `host` | Broker hostname |
 | `port` | Broker port |
 | `path` | WebSocket path (default: none) |
-| `topicPrefix` | MQTT topic prefix |
+| `topicPrefix` | MQTT topic prefix, used when `packetTopic` or `statusTopic` is unset (default: `meshcore`) |
+| `packetTopic` / `statusTopic` | Topic templates with `{iata}` `{pubkey}` `{name}` (uppercase also works). Unset = `<topicPrefix>/{iata}/{pubkey}/packets` (resp. `/status`) |
 | `disallowedPacketTypes` | Packet types to exclude (e.g. `["ack", "advert"]`) |
 | `retainStatus` | Retain status messages on the broker |
 | `tlsEnabled` | Enable TLS |
@@ -400,6 +477,21 @@ audience = "meshcore-mqtt-1.baird.io"
 | `username` | Username for basic auth |
 | `password` | Password for basic auth |
 | `audience` | Token audience (for token auth) |
+
+Topics default to the layout LetsMesh and meshcoretomqtt use. A broker that expects another layout can set its own; `{name}` is the observer's `name`. The offline message the broker publishes if the bot drops off uses `statusTopic` too:
+
+```toml
+[[bot.mqtt.broker]]
+name = "home"
+enabled = true
+host = "192.168.1.10"
+port = 1883
+authType = "none"
+packetTopic = "mesh/{iata}/{name}/packets"
+statusTopic = "mesh/{iata}/{name}/status"
+```
+
+A template with an unknown placeholder or an MQTT wildcard (`+`, `#`) stops the bot loading, and a `SIGHUP` reload with one keeps the running config.
 
 | Advert Field | Description |
 |--------------|-------------|
@@ -415,7 +507,7 @@ When enabled, the observer broadcasts a signed chat-node advert over the mesh on
 Send a `SIGHUP` signal to the process to reload the configuration without restarting:
 
 ```bash
-kill -SIGHUP $(pgrep meshcore-bot)
+kill -SIGHUP $(pgrep OwlBot)
 ```
 
 If the connection settings, radio parameters, `spiBoard` or `modemToken` change, the bot reconnects the radio.

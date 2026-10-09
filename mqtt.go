@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	meshcore "github.com/OwlShack/meshcore-go"
+	"github.com/OwlShack/meshcore-go/node"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	meshcore "github.com/meshcore-go/meshcore-go"
-	"github.com/meshcore-go/meshcore-go/node"
 )
 
 type brokerClient struct {
@@ -22,9 +22,10 @@ type brokerClient struct {
 	mu     sync.Mutex // guards client (swapped by tokenRefreshLoop while the publish worker uses it)
 	client mqtt.Client
 
-	pubKeyHx string
-	iata     string
-	prefix   string
+	pubKeyHx    string
+	iata        string
+	packetTopic string
+	statusTopic string
 
 	disallowed map[byte]bool
 	// One cache per direction. A packet we transmit that we already published
@@ -37,6 +38,9 @@ type brokerClient struct {
 	stop       chan struct{} // closed by Stop to halt the worker; publishCh is never closed, so an in-flight send can't panic
 	workerDone chan struct{}
 	dropped    atomic.Uint64
+	// downDropped counts packets dropped since the broker went unreachable.
+	// Only publishWorker touches it.
+	downDropped uint64
 	// retrying is true while a connectAndRetry loop owns this broker. Needed
 	// now that BOTH Start and a failed token refresh can spawn one: without it
 	// two loops race on the same client pointer and both swapClient.
@@ -80,14 +84,6 @@ type publishJob struct {
 	payload []byte
 	qos     byte
 	retain  bool
-}
-
-func (b *brokerClient) packetTopic() string {
-	return fmt.Sprintf("%s/%s/%s/packets", b.prefix, b.iata, b.pubKeyHx)
-}
-
-func (b *brokerClient) statusTopic() string {
-	return fmt.Sprintf("%s/%s/%s/status", b.prefix, b.iata, b.pubKeyHx)
 }
 
 func (b *brokerClient) isAllowed(payloadType byte) bool {
@@ -173,20 +169,18 @@ func (o *MqttObserver) Start(ctx context.Context) error {
 		}
 
 		disallowed := parseDisallowed(bcfg.DisallowedPacketTypes)
-		prefix := bcfg.TopicPrefix
-		if prefix == "" {
-			prefix = "meshcore"
-		}
+		packetTopic, statusTopic := resolveTopics(bcfg, iata, o.pubKeyHx, o.originName)
 
 		bc := &brokerClient{
-			cfg:        bcfg,
-			pubKeyHx:   o.pubKeyHx,
-			iata:       iata,
-			prefix:     prefix,
-			disallowed: disallowed,
-			publishCh:  make(chan publishJob, publishQueueDepth),
-			stop:       make(chan struct{}),
-			workerDone: make(chan struct{}),
+			cfg:         bcfg,
+			pubKeyHx:    o.pubKeyHx,
+			iata:        iata,
+			packetTopic: packetTopic,
+			statusTopic: statusTopic,
+			disallowed:  disallowed,
+			publishCh:   make(chan publishJob, publishQueueDepth),
+			stop:        make(chan struct{}),
+			workerDone:  make(chan struct{}),
 		}
 		if bcfg.Dedup {
 			bc.dedupRx = &meshcore.DedupCache{}
@@ -245,7 +239,7 @@ func (o *MqttObserver) connectAndRetry(ctx context.Context, bc *brokerClient) {
 			return
 		}
 
-		client, err := o.connectBroker(bc.cfg, bc.iata)
+		client, err := o.connectBroker(ctx, bc)
 		if err == nil {
 			// Stop can run while a dial is in flight. Adopting the client then
 			// would hand a live connection to a broker nobody will disconnect.
@@ -402,8 +396,8 @@ func (o *MqttObserver) publishPacket(pkt *meshcore.Packet, rawBytes []byte, dire
 			continue
 		}
 		o.log.Log(context.Background(), LevelTrace, "queuing packet",
-			"broker", bc.cfg.Name, "topic", bc.packetTopic(), "direction", direction)
-		o.enqueuePublish(bc, publishJob{topic: bc.packetTopic(), payload: payload})
+			"broker", bc.cfg.Name, "topic", bc.packetTopic, "direction", direction)
+		o.enqueuePublish(bc, publishJob{topic: bc.packetTopic, payload: payload})
 	}
 }
 
@@ -430,10 +424,16 @@ func (o *MqttObserver) publishWorker(bc *brokerClient) {
 
 func (o *MqttObserver) doPublish(bc *brokerClient, job publishJob) {
 	client := bc.currentClient()
-	if client == nil || !client.IsConnected() {
+	// IsConnected stays true while paho auto-reconnects, and paho then
+	// completes a QoS 0 publish without sending or storing it. Drop those here
+	// too, so the outage is counted and logged rather than silent.
+	if client == nil || !client.IsConnected() || (job.qos == 0 && !client.IsConnectionOpen()) {
 		// Publishing to a disconnected client blocks for the full
-		// publishWaitTimeout per job and stalls the worker.
-		bc.dropped.Add(1)
+		// publishWaitTimeout per job and stalls the worker. No buffer: a
+		// packet heard while the broker is down is not sent later.
+		if bc.downDropped++; bc.downDropped == 1 {
+			o.log.Warn("broker not connected, dropping packets until it is", "broker", bc.cfg.Name)
+		}
 		return
 	}
 	token := client.Publish(job.topic, job.qos, job.retain, job.payload)
@@ -443,6 +443,11 @@ func (o *MqttObserver) doPublish(bc *brokerClient, job publishJob) {
 	}
 	if err := token.Error(); err != nil {
 		o.log.Error("publish error", "broker", bc.cfg.Name, "error", err)
+		return
+	}
+	if bc.downDropped > 0 {
+		o.log.Info("broker publishing again", "broker", bc.cfg.Name, "dropped", bc.downDropped)
+		bc.downDropped = 0
 	}
 }
 
@@ -579,7 +584,7 @@ func (o *MqttObserver) tokenRefreshLoop(ctx context.Context) {
 				}
 				o.log.Debug("refreshing token", "broker", bc.cfg.Name)
 
-				newClient, err := o.connectBroker(bc.cfg, bc.iata)
+				newClient, err := o.connectBroker(ctx, bc)
 				if err != nil {
 					// Without a retry the broker keeps a client whose token
 					// expires in ~2 minutes and nothing tries again until the
@@ -665,7 +670,7 @@ func (o *MqttObserver) publishStatus(ctx context.Context, bc *brokerClient, stat
 	}
 
 	o.log.Log(ctx, LevelTrace, "publishing status",
-		"broker", bc.cfg.Name, "topic", bc.statusTopic(),
+		"broker", bc.cfg.Name, "topic", bc.statusTopic,
 		"json", string(payload))
 	// Queued, not published inline. A bare token.Wait() here was unbounded:
 	// Stop passes a 5s context but it never reaches the token, so an
@@ -673,14 +678,15 @@ func (o *MqttObserver) publishStatus(ctx context.Context, bc *brokerClient, stat
 	// The worker path is bounded by publishWaitTimeout, and it is also the one
 	// place the nil/disconnected client is handled, so no guard is needed here.
 	o.enqueuePublish(bc, publishJob{
-		topic:   bc.statusTopic(),
+		topic:   bc.statusTopic,
 		payload: payload,
 		qos:     1,
 		retain:  bc.cfg.RetainStatus,
 	})
 }
 
-func (o *MqttObserver) connectBroker(bcfg BrokerConfig, iata string) (mqtt.Client, error) {
+func (o *MqttObserver) connectBroker(ctx context.Context, bc *brokerClient) (mqtt.Client, error) {
+	bcfg, iata := bc.cfg, bc.iata
 	var scheme string
 	switch strings.ToLower(bcfg.Transport) {
 	case "websockets", "ws", "wss":
@@ -706,6 +712,13 @@ func (o *MqttObserver) connectBroker(bcfg BrokerConfig, iata string) (mqtt.Clien
 	opts.SetKeepAlive(60 * time.Second)
 	opts.SetCleanSession(true)
 	opts.SetAutoReconnect(true)
+	// The broker publishes our will when the link drops, so after paho
+	// reconnects on its own the status must say online again now, not at the
+	// next status tick minutes later. The first connect is the caller's.
+	opts.SetOnConnectHandler(onReconnect(func() {
+		o.log.Info("reconnected", "broker", bcfg.Name)
+		o.publishStatus(ctx, bc, "online")
+	}))
 	opts.SetMaxReconnectInterval(5 * time.Minute)
 
 	if bcfg.TlsEnabled {
@@ -732,11 +745,7 @@ func (o *MqttObserver) connectBroker(bcfg BrokerConfig, iata string) (mqtt.Clien
 		opts.SetPassword(bcfg.Password)
 	}
 
-	prefix := bcfg.TopicPrefix
-	if prefix == "" {
-		prefix = "meshcore"
-	}
-	statusTopic := fmt.Sprintf("%s/%s/%s/status", prefix, iata, o.pubKeyHx)
+	_, statusTopic := resolveTopics(bcfg, iata, o.pubKeyHx, o.originName)
 
 	// LWT uses minimal status (no live stats — we're about to disconnect).
 	offlinePayload, _ := formatStatus("offline", o.originName, o.pubKeyHx, RadioInfo{}, DeviceStats{}, PacketCounts{}, 0, linkHealth{})
@@ -782,4 +791,15 @@ func parseDisallowed(names []string) map[byte]bool {
 		}
 	}
 	return m
+}
+
+// onReconnect runs f on every connect after the first. paho calls the handler
+// for the initial connect too, and that one already publishes its own status.
+func onReconnect(f func()) mqtt.OnConnectHandler {
+	var connects atomic.Int32
+	return func(mqtt.Client) {
+		if connects.Add(1) > 1 {
+			f()
+		}
+	}
 }

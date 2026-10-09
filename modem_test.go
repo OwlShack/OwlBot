@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/meshcore-go/meshcore-go/hardware"
-	"github.com/meshcore-go/meshcore-go/hardware/openhop"
-	"github.com/meshcore-go/meshcore-go/hardware/sx12xx"
+	"github.com/OwlShack/meshcore-go/hardware"
+	"github.com/OwlShack/meshcore-go/hardware/openhop"
+	"github.com/OwlShack/meshcore-go/hardware/sx12xx"
 )
 
 // A hardware-verified board, pinned pin by pin: a preset that parses but maps a
