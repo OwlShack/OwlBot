@@ -270,6 +270,17 @@ func (c *Config) validate() error {
 				return fmt.Errorf("bot %s trigger %d: %w", botLabel(b), i+1, err)
 			}
 		}
+		if b.Mqtt == nil {
+			continue
+		}
+		for _, br := range b.Mqtt.Brokers {
+			if err := validateTopicTemplate(br.PacketTopic); err != nil {
+				return fmt.Errorf("broker %q packetTopic: %w", br.Name, err)
+			}
+			if err := validateTopicTemplate(br.StatusTopic); err != nil {
+				return fmt.Errorf("broker %q statusTopic: %w", br.Name, err)
+			}
+		}
 	}
 	// Checked here, not at connect, so a bad connection on SIGHUP is a reload
 	// that keeps the running config rather than a modem setup that exits.

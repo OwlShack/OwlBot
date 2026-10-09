@@ -32,6 +32,9 @@ built on meshcore-go v1.7.0.
   `"Pacific/Auckland"` sets the time zone, and works the same on every platform.
 - **Posts can be scoped to a MeshCore region.** `floodScope = "region:nz"` on a bot or a trigger
   sends its posts so only repeaters that allow `#nz` pass them on. Unset stays unscoped, as before.
+- **Each MQTT broker can set its own topics.** `packetTopic` and `statusTopic` take `{iata}`,
+  `{pubkey}` and `{name}`, for brokers that expect a different layout. Unset keeps the current
+  topics.
 - **Choose how path hashes are joined.** `{{formatPathBytes .PathHashes " > "}}` gives
   `A1 > B2 > C3` instead of the default `A1, B2, C3`.
 
