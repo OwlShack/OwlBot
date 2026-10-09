@@ -859,3 +859,19 @@ func TestDoPublishLogsDropsWhileBrokerDown(t *testing.T) {
 		t.Errorf("%d drop warnings after a mid-run outage, want 2", n)
 	}
 }
+
+// The first connect publishes its own online; paho calls the handler for it
+// too. Every later connect is an auto-reconnect and must say online again.
+func TestOnReconnectSkipsFirstConnect(t *testing.T) {
+	n := 0
+	h := onReconnect(func() { n++ })
+	h(nil)
+	if n != 0 {
+		t.Fatalf("first connect fired the reconnect action (%d)", n)
+	}
+	h(nil)
+	h(nil)
+	if n != 2 {
+		t.Errorf("two reconnects fired it %d times, want 2", n)
+	}
+}

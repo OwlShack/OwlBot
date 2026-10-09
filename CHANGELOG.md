@@ -50,6 +50,9 @@ built on meshcore-go v1.7.0.
 
 ### Fixed
 
+- **The MQTT status says online again as soon as a broker reconnects.** When the link drops, the
+  broker publishes the bot as offline. It used to stay that way until the next status, up to 5
+  minutes later, even though the bot was back.
 - **Packets dropped while a broker is down are now logged.** They are still not buffered, but a
   warning says when a broker starts dropping them, and the count is logged when it reconnects.
   Before, they went missing without a word, including any heard in the moment before the first
