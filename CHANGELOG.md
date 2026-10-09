@@ -3,7 +3,7 @@
 Notable changes per release. Dates are the tag date; unreleased work sits at the
 top until tagged.
 
-## Unreleased
+## v1.3.0 - 2026-10-09
 
 > [!WARNING]
 > **meshcore-bot is now OwlBot. Updating needs a manual step, or you stay on v1.2.0.**
