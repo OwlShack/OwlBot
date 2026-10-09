@@ -239,7 +239,7 @@ func (o *MqttObserver) connectAndRetry(ctx context.Context, bc *brokerClient) {
 			return
 		}
 
-		client, err := o.connectBroker(bc.cfg, bc.iata)
+		client, err := o.connectBroker(ctx, bc)
 		if err == nil {
 			// Stop can run while a dial is in flight. Adopting the client then
 			// would hand a live connection to a broker nobody will disconnect.
@@ -584,7 +584,7 @@ func (o *MqttObserver) tokenRefreshLoop(ctx context.Context) {
 				}
 				o.log.Debug("refreshing token", "broker", bc.cfg.Name)
 
-				newClient, err := o.connectBroker(bc.cfg, bc.iata)
+				newClient, err := o.connectBroker(ctx, bc)
 				if err != nil {
 					// Without a retry the broker keeps a client whose token
 					// expires in ~2 minutes and nothing tries again until the
@@ -685,7 +685,8 @@ func (o *MqttObserver) publishStatus(ctx context.Context, bc *brokerClient, stat
 	})
 }
 
-func (o *MqttObserver) connectBroker(bcfg BrokerConfig, iata string) (mqtt.Client, error) {
+func (o *MqttObserver) connectBroker(ctx context.Context, bc *brokerClient) (mqtt.Client, error) {
+	bcfg, iata := bc.cfg, bc.iata
 	var scheme string
 	switch strings.ToLower(bcfg.Transport) {
 	case "websockets", "ws", "wss":
@@ -711,6 +712,13 @@ func (o *MqttObserver) connectBroker(bcfg BrokerConfig, iata string) (mqtt.Clien
 	opts.SetKeepAlive(60 * time.Second)
 	opts.SetCleanSession(true)
 	opts.SetAutoReconnect(true)
+	// The broker publishes our will when the link drops, so after paho
+	// reconnects on its own the status must say online again now, not at the
+	// next status tick minutes later. The first connect is the caller's.
+	opts.SetOnConnectHandler(onReconnect(func() {
+		o.log.Info("reconnected", "broker", bcfg.Name)
+		o.publishStatus(ctx, bc, "online")
+	}))
 	opts.SetMaxReconnectInterval(5 * time.Minute)
 
 	if bcfg.TlsEnabled {
@@ -783,4 +791,15 @@ func parseDisallowed(names []string) map[byte]bool {
 		}
 	}
 	return m
+}
+
+// onReconnect runs f on every connect after the first. paho calls the handler
+// for the initial connect too, and that one already publishes its own status.
+func onReconnect(f func()) mqtt.OnConnectHandler {
+	var connects atomic.Int32
+	return func(mqtt.Client) {
+		if connects.Add(1) > 1 {
+			f()
+		}
+	}
 }
