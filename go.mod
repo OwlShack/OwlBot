@@ -3,10 +3,10 @@ module github.com/OwlShack/OwlBot
 go 1.26.7
 
 require (
-	github.com/OwlShack/meshcore-go v1.7.0
-	github.com/OwlShack/meshcore-go/hardware/openhop v1.7.0
-	github.com/OwlShack/meshcore-go/hardware/sx12xx v1.7.0
-	github.com/OwlShack/meshcore-go/hardware/transport v1.7.0
+	github.com/OwlShack/meshcore-go v1.9.0
+	github.com/OwlShack/meshcore-go/hardware/openhop v1.9.0
+	github.com/OwlShack/meshcore-go/hardware/sx12xx v1.9.0
+	github.com/OwlShack/meshcore-go/hardware/transport v1.9.0
 	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/robfig/cron/v3 v3.0.1
