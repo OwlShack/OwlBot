@@ -3,6 +3,15 @@
 Notable changes per release. Dates are the tag date; unreleased work sits at the
 top until tagged.
 
+## Unreleased
+
+### Changed
+
+- **Built on meshcore-go v1.9.0.** Airtime for the duty-cycle budget now comes from the radio
+  itself, so on openHop it follows the modem's live settings.
+- **Packet airtime in MQTT matches firmware to the millisecond.** `duration`, `rx_air_secs` and
+  `tx_air_secs` could read up to 1 ms per packet high.
+
 ## v1.3.0 - 2026-10-09
 
 > [!WARNING]

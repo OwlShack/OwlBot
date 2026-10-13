@@ -86,15 +86,8 @@ func muxOptions(ms *modemState) []node.MuxOption {
 			ms.parseErrors.Add(1)
 		}),
 	}
-	if ms.radioConfig != nil {
-		// The budget only exists when an estimator is set, so the factor is
-		// only meaningful alongside it.
-		opts = append(opts,
-			node.WithMuxAirtimeEstimator(hardware.LoRaAirtimeEstimator(ms.radioConfig)),
-			node.WithMuxAirtimeFactor(ms.airtimeFactor),
-		)
-	}
-	return opts
+	// The mux reads airtime from the modem, so the factor always has an estimate to scale.
+	return append(opts, node.WithMuxAirtimeFactor(ms.airtimeFactor))
 }
 
 func main() {
@@ -441,11 +434,9 @@ func setupKiss(ctx context.Context, ms *modemState, cfg *Config, connScheme, con
 		hardware.WithSignalReport(true),
 		hardware.WithLogger(slog.Default()),
 		// Flow control is already the library default; pinned explicitly so a
-		// change of default cannot silently un-serialize TX. The estimator is
-		// the part that matters: it sizes the TX_DONE wait from real
-		// time-on-air, which DefaultTxTimeout is too short for at high SF.
+		// change of default cannot silently un-serialize TX. The TX_DONE wait
+		// is sized from the airtime the modem learns from SetRadio below.
 		hardware.WithTxFlowControl(hardware.DefaultTxTimeout),
-		hardware.WithTxAirtimeEstimator(hardware.LoRaAirtimeEstimator(ms.radioConfig)),
 		// DATA frames dispatch serially on one goroutine, so a slow handler
 		// stalls RX for every bot. Dispatch should be sub-millisecond; this
 		// only fires on a real stall.
